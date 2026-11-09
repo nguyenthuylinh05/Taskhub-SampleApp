@@ -52,14 +52,24 @@ async def test_user_repository_crud_and_pagination() -> None:
             assert any(item.id == user_id for item in users)
 
             # 4. Test pagination
-            paginated_users, total = await repository.get_paginated(
+            page_1, total = await repository.get_paginated(
                 page=1,
                 limit=10,
             )
 
+            page_2, _ = await repository.get_paginated(
+                page=2,
+                limit=10,
+            )
+
             assert total >= 1
-            assert len(paginated_users) <= 10
-            assert any(item.id == user_id for item in paginated_users)
+            assert len(page_1) <= 10
+            assert len(page_2) <= 10
+
+            page_1_ids = {item.id for item in page_1}
+            page_2_ids = {item.id for item in page_2}
+
+            assert page_1_ids.isdisjoint(page_2_ids)
 
             # 5. Update user
             updated_user = await repository.update(

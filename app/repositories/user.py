@@ -17,3 +17,10 @@ class UserRepository(BaseRepository[User]):
         statement = select(User).where(User.email == email)
         result = await self.session.scalar(statement)
         return result
+
+    async def get_by_id(self, user_id: int) -> User | None:
+        """Get a user by ID."""
+
+        statement = select(User).where(User.id == user_id)
+        result = await self.session.scalar(statement)
+        return result

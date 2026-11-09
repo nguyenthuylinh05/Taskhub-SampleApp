@@ -5,6 +5,8 @@ from fastapi import FastAPI
 
 from app.api.v1.router import api_router
 from app.core.database import engine
+from app.core.exception_handlers import app_exception_handler
+from app.core.exceptions import AppException
 from app.repositories.project import InMemoryProjectRepository
 
 
@@ -26,6 +28,11 @@ app = FastAPI(
     description="Task Management API built with FastAPI",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_exception_handler(
+    AppException,
+    app_exception_handler,
 )
 
 app.include_router(

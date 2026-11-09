@@ -32,3 +32,16 @@ class UserUpdate(BaseModel):
     )
     role: UserRole | None = None
     is_active: bool | None = None
+
+
+class UserProfileUpdate(BaseModel):
+    email: EmailStr | None = None
+    full_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+    )
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
