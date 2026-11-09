@@ -1,12 +1,17 @@
 # TaskHub - Task Management API
 
-TaskHub is a task management backend API built with FastAPI. The project is developed as a learning project to demonstrate clean code practices, layered architecture, dependency injection, API versioning, and automated testing.
+TaskHub is a task management backend API built with FastAPI. The project is developed as a learning project to demonstrate clean code practices, layered architecture, dependency injection, API versioning, database integration, and automated testing.
 
 ## Tech Stack
 
 - Python 3.12
-- FastAPI
+- FastAPI 0.111+
 - Pydantic v2
+- SQLAlchemy 2.x (Async)
+- Alembic
+- PostgreSQL 16
+- Redis 7 (planned integration)
+- Docker & Docker Compose
 - Uvicorn
 - Pytest
 - Ruff
@@ -20,28 +25,41 @@ The project follows a Layered Architecture to separate responsibilities and impr
 - **Schema Layer:** Defines request and response data structures using Pydantic.
 - **Service Layer:** Contains application business logic.
 - **Repository Layer:** Handles data access operations.
-- **Core Layer:** Contains shared configuration, dependencies, and application-level components.
+- **Model Layer:** Defines database tables and relationships using SQLAlchemy ORM.
+- **Core Layer:** Contains shared configuration, database connections, dependencies, and security components.
 
 ## Project Structure
 
 ```text
 Taskhub-SampleApp/
+├── alembic/
+│   └── versions/
 ├── app/
 │   ├── api/
 │   │   └── v1/
 │   │       ├── endpoints/
+│   │       │   ├── projects.py
+│   │       │   └── users.py
 │   │       └── router.py
 │   ├── core/
-│   │   └── dependencies.py
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── dependencies.py
+│   │   └── security.py
+│   ├── models/
 │   ├── repositories/
 │   ├── schemas/
 │   ├── services/
 │   └── main.py
 ├── tests/
-│   └── test_projects.py
+│   ├── test_projects.py
+│   └── test_repositories.py
 ├── .env.example
 ├── .gitignore
+├── alembic.ini
+├── compose.yaml
 ├── pyproject.toml
+├── uv.lock
 └── README.md
 ```
 
@@ -80,59 +98,23 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### 4. Run the Application
+### 4. Configure Environment Variables
 
-```bash
-python -m uvicorn app.main:app --reload
+Create a `.env` file in the project root directory.
+
+Example configuration:
+
+```env
+POSTGRES_DB=taskhub_db
+POSTGRES_USER=taskhub_user
+POSTGRES_PASSWORD=your_secure_password
+POSTGRES_PORT=5432
 ```
 
-The API will be available at:
+Do not commit `.env` because it contains environment-specific configuration and credentials.
 
-- API: http://127.0.0.1:8000
-- Swagger UI: http://127.0.0.1:8000/docs
-- ReDoc: http://127.0.0.1:8000/redoc
+### 5. Start PostgreSQL with Docker
 
-## Running Tests
+Make sure Docker Desktop or Docker Engine is running.
 
-Run the test suite:
-
-```bash
-pytest -v
-```
-
-Run tests with coverage:
-
-```bash
-pytest --cov=app --cov-report=term-missing
-```
-
-## Code Quality
-
-Check code style with Ruff:
-
-```bash
-ruff check .
-```
-
-Check formatting:
-
-```bash
-ruff format --check .
-```
-
-Run static type checking:
-
-```bash
-mypy app/
-```
-
-## Development Notes
-
-- The application uses FastAPI dependency injection.
-- API routes are organized under the `/api/v1` version prefix.
-- The repository layer is currently designed to support the initial application architecture.
-- Automated tests are maintained in the `tests/` directory.
-
-## License
-
-This project is developed for educational purposes.
+Start
