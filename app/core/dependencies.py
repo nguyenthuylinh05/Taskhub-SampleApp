@@ -10,6 +10,7 @@ from app.repositories.project import InMemoryProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
+from app.services.auth import AuthService
 from app.services.project import ProjectService
 
 
@@ -61,6 +62,20 @@ def get_user_repository(
 UserRepositoryDep = Annotated[
     UserRepository,
     Depends(get_user_repository),
+]
+
+
+def get_auth_service(
+    repository: UserRepositoryDep,
+) -> AuthService:
+    """Get authentication service."""
+
+    return AuthService(repository)
+
+
+AuthServiceDep = Annotated[
+    AuthService,
+    Depends(get_auth_service),
 ]
 
 
