@@ -4,22 +4,21 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.v1.router import api_router
+from app.core.database import engine
 from app.repositories.project import InMemoryProjectRepository
 
 
 @asynccontextmanager
-async def lifespan(
-    app: FastAPI,
-) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage application startup and shutdown."""
 
-    # Startup
     app.state.project_repository = InMemoryProjectRepository()
 
-    yield
-
-    # Shutdown
-    del app.state.project_repository
+    try:
+        yield
+    finally:
+        await engine.dispose()
+        del app.state.project_repository
 
 
 app = FastAPI(
