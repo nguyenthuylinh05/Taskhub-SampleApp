@@ -400,6 +400,15 @@ def test_change_password_success(
 
     assert login_response.status_code == 200
 
+    old_password_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": user_data["email"],
+            "password": "TestPassword123",
+        },
+    )
+
+    assert old_password_response.status_code == 401
 
 def test_change_password_wrong_current_password(
     client: TestClient,

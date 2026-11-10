@@ -27,7 +27,7 @@ def mock_redis(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     monkeypatch.setattr("app.services.auth.rotate_refresh_token", rotate_mock)
     monkeypatch.setattr("app.services.auth.revoke_refresh_token", revoke_mock)
     monkeypatch.setattr(
-        "app.api.v1.endpoints.users.revoke_all_refresh_tokens",
+        "app.services.auth.revoke_all_refresh_tokens",
         revoke_all_mock,
     )
 

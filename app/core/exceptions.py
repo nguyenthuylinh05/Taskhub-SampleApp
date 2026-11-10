@@ -1,5 +1,7 @@
 from fastapi import status
 
+from app.core import messages
+
 
 class AppException(Exception):
     """Base exception for application errors."""
@@ -19,7 +21,7 @@ class EmailAlreadyRegistered(AppException):
 
     def __init__(self) -> None:
         super().__init__(
-            message="Email is already registered",
+            message=messages.EMAIL_ALREADY_REGISTERED,
             status_code=status.HTTP_409_CONFLICT,
         )
 

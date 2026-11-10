@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User
+from app.models import User, UserRole
 from app.repositories.base import BaseRepository
 
 
@@ -18,20 +18,16 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.scalar(statement)
         return result
 
-    async def get_by_id(self, user_id: int) -> User | None:
-        """Get a user by ID."""
-
-        statement = select(User).where(User.id == user_id)
-        result = await self.session.scalar(statement)
-        return result
-
     async def count_active_admins(self) -> int:
         """Count active admin users."""
-        from app.models.enums import UserRole
 
-        statement = select(func.count()).select_from(User).where(
-            User.role == UserRole.ADMIN,
-            User.is_active.is_(True),
+        statement = (
+            select(func.count())
+            .select_from(User)
+            .where(
+                User.role == UserRole.ADMIN,
+                User.is_active.is_(True),
+            )
         )
 
         result = await self.session.scalar(statement)

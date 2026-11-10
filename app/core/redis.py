@@ -2,12 +2,13 @@ from typing import cast
 
 import redis.asyncio as redis
 
-from app.core.config import REDIS_URL, REFRESH_TOKEN_EXPIRE_DAYS
+from app.core.config import REDIS_URL, REFRESH_TOKEN_EXPIRE_SECONDS
 
 redis_client = redis.from_url(
     REDIS_URL,
     encoding="utf-8",
     decode_responses=True,
+    socket_timeout=5,
 )
 
 
@@ -258,7 +259,7 @@ async def revoke_all_refresh_tokens(user_id: str) -> int:
         user_id,
         "refresh_token:",
         "revoked_refresh_token:",
-        REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        REFRESH_TOKEN_EXPIRE_SECONDS,
     )
 
     return cast(int, result)
