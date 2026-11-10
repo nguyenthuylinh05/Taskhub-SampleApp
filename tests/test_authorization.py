@@ -9,7 +9,7 @@ from app.api.dependencies import (
     require_workspace_member,
     require_workspace_owner,
 )
-from app.core.exceptions import PermissionDenied, ResourceNotFound
+from app.core.exceptions import NotFoundException, PermissionDenied
 from app.models import User, UserRole, Workspace, WorkspaceRole
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,7 +112,7 @@ async def test_non_member_cannot_access_workspace() -> None:
     session_mock.execute.return_value = result
     session = cast(AsyncSession, session_mock)
 
-    with pytest.raises(ResourceNotFound):
+    with pytest.raises(NotFoundException):
         await get_workspace_role(
             workspace_id=10,
             current_user=user,
@@ -131,7 +131,7 @@ async def test_nonexistent_workspace_returns_not_found() -> None:
     session_mock.get.return_value = None
     session = cast(AsyncSession, session_mock)
 
-    with pytest.raises(ResourceNotFound):
+    with pytest.raises(NotFoundException):
         await get_workspace_role(
             workspace_id=999,
             current_user=user,
