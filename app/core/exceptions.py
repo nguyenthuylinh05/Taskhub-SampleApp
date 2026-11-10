@@ -52,3 +52,43 @@ class InvalidRefreshToken(AppException):
             message="Invalid or revoked refresh token",
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
+
+
+class PermissionDenied(AppException):
+    """Raised when a user does not have permission to perform an action."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="You do not have permission to perform this action",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
+
+class ResourceNotFound(AppException):
+    """Raised when a resource does not exist or is not accessible."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="Resource not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+
+class ConflictError(AppException):
+    """Raised when a resource conflicts with the current state."""
+
+    def __init__(self, message: str = "Resource already exists") -> None:
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class InvalidOperation(AppException):
+    """Raised when an operation violates business rules."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )

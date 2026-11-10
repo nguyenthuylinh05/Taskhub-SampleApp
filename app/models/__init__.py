@@ -1,5 +1,6 @@
 from app.models.base import Base
 from app.models.comment import Comment
+from app.models.enums import UserRole, WorkspaceRole
 from app.models.label import Label, task_labels
 from app.models.project import Project
 from app.models.task import Task
@@ -13,7 +14,9 @@ __all__ = [
     "Project",
     "Task",
     "User",
+    "UserRole",
     "Workspace",
+    "WorkspaceRole",
     "task_labels",
     "workspace_members",
 ]

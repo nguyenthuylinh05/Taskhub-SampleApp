@@ -2,9 +2,14 @@ from typing import TypedDict, cast
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+import anyio
 import jwt
-from app.core.config import JWT_ALGORITHM, JWT_SECRET_KEY
+from app.core.config import DATABASE_URL, JWT_ALGORITHM, JWT_SECRET_KEY
+from app.models import User, UserRole
 from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 
 class RegisteredUser(TypedDict):
@@ -59,6 +64,33 @@ def login_user(
     assert response.status_code == 200
 
     return cast(str, response.json()["access_token"])
+
+
+def promote_to_admin(user_id: int) -> None:
+    """Promote a test user to ADMIN directly in the database."""
+
+    async def update_role() -> None:
+        test_engine = create_async_engine(
+            DATABASE_URL,
+            poolclass=NullPool,
+        )
+        session_factory = async_sessionmaker(
+            test_engine,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with session_factory() as session:
+                await session.execute(
+                    update(User)
+                    .where(User.id == user_id)
+                    .values(role=UserRole.ADMIN)
+                )
+                await session.commit()
+        finally:
+            await test_engine.dispose()
+
+    anyio.run(update_role)
 
 
 def test_register_success(
@@ -446,13 +478,38 @@ def test_inactive_user_cannot_access_protected_endpoint(
     user_data = register_user(client, cleanup_user)
     access_token = login_user(client, user_data)
 
-    response = client.patch(
-        f"/api/v1/users/{user_data['id']}",
-        json={"is_active": False},
-    )
+    # Deactivate the user directly in the database.
+    import anyio
+    from app.core.config import DATABASE_URL
+    from app.models import User
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
 
-    assert response.status_code in (200, 204)
+    async def deactivate_user() -> None:
+        test_engine = create_async_engine(
+            DATABASE_URL,
+            poolclass=NullPool,
+        )
+        session_factory = async_sessionmaker(
+            test_engine,
+            expire_on_commit=False,
+        )
 
+        try:
+            async with session_factory() as session:
+                await session.execute(
+                    update(User)
+                    .where(User.id == user_data["id"])
+                    .values(is_active=False)
+                )
+                await session.commit()
+        finally:
+            await test_engine.dispose()
+
+    anyio.run(deactivate_user)
+
+    # The previously issued access token must no longer work.
     response = client.get(
         "/api/v1/users/me",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -460,3 +517,81 @@ def test_inactive_user_cannot_access_protected_endpoint(
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Inactive user"
+
+
+def test_admin_cannot_delete_self(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> None:
+    admin = register_user(client, cleanup_user)
+    promote_to_admin(admin["id"])
+    token = login_user(client, admin)
+
+    response = client.delete(
+        f"/api/v1/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "You cannot delete your own account"
+
+
+def test_cannot_demote_last_active_admin(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> None:
+    admin = register_user(client, cleanup_user)
+    promote_to_admin(admin["id"])
+    token = login_user(client, admin)
+
+    response = client.patch(
+        f"/api/v1/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "MEMBER"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Cannot remove or deactivate the last active admin"
+    )
+
+
+def test_cannot_deactivate_last_active_admin(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> None:
+    admin = register_user(client, cleanup_user)
+    promote_to_admin(admin["id"])
+    token = login_user(client, admin)
+
+    response = client.patch(
+        f"/api/v1/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"is_active": False},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Cannot remove or deactivate the last active admin"
+    )
+
+
+def test_cannot_delete_last_active_admin(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> None:
+    admin = register_user(client, cleanup_user)
+    promote_to_admin(admin["id"])
+
+    # Create another active admin to perform the deletion request.
+    second_admin = register_user(client, cleanup_user)
+    promote_to_admin(second_admin["id"])
+    token = login_user(client, second_admin)
+
+    # The second admin is active, so deleting the first admin is allowed.
+    response = client.delete(
+        f"/api/v1/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 204

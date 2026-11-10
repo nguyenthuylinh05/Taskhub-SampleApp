@@ -2,11 +2,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, require_admin
 from app.core.dependencies import UserRepositoryDep
 from app.core.redis import revoke_all_refresh_tokens
 from app.core.security import hash_password, verify_password
-from app.models import User
+from app.models import User, UserRole
 from app.schemas.user import (
     ChangePasswordRequest,
     UserCreate,
@@ -109,7 +109,7 @@ async def update_current_user_profile(
     return UserResponse.model_validate(user)
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_admin)])
 async def get_users(
     repository: UserRepositoryDep,
     page: int = Query(default=1, ge=1),
@@ -138,7 +138,7 @@ async def get_users(
     }
 
 
-@router.get("/{user_id}")
+@router.get("/{user_id}", dependencies=[Depends(require_admin)])
 async def get_user(
     user_id: int,
     repository: UserRepositoryDep,
@@ -165,6 +165,7 @@ async def get_user(
     "/",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin)],
 )
 async def create_user(
     user_data: UserCreate,
@@ -190,7 +191,11 @@ async def create_user(
     return UserResponse.model_validate(user)
 
 
-@router.patch("/{user_id}", response_model=UserResponse)
+@router.patch(
+    "/{user_id}",
+    response_model=UserResponse,
+    dependencies=[Depends(require_admin)],
+)
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
@@ -204,6 +209,14 @@ async def update_user(
             detail="Update fields cannot be null",
         )
 
+    target_user = await repository.get_by_id(user_id)
+
+    if target_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
     if "email" in update_data:
         existing_user = await repository.get_by_email(update_data["email"])
         if existing_user is not None and existing_user.id != user_id:
@@ -211,6 +224,22 @@ async def update_user(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email already registered",
             )
+
+    # Prevent removing the last active admin.
+    removes_admin_access = (
+        target_user.role == UserRole.ADMIN
+        and target_user.is_active
+        and (
+            update_data.get("role") == UserRole.MEMBER
+            or update_data.get("is_active") is False
+        )
+    )
+
+    if removes_admin_access and await repository.count_active_admins() <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot remove or deactivate the last active admin",
+        )
 
     user = await repository.update(user_id, update_data)
 
@@ -226,11 +255,39 @@ async def update_user(
 @router.delete(
     "/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_admin)],
 )
 async def delete_user(
     user_id: int,
     repository: UserRepositoryDep,
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
+    # Prevent an admin from deleting their own account.
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You cannot delete your own account",
+        )
+
+    target_user = await repository.get_by_id(user_id)
+
+    if target_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    # Prevent deleting the last active admin.
+    if (
+        target_user.role == UserRole.ADMIN
+        and target_user.is_active
+        and await repository.count_active_admins() <= 1
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete the last active admin",
+        )
+
     deleted = await repository.delete(user_id)
 
     if not deleted:

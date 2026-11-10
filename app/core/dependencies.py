@@ -12,6 +12,7 @@ from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.services.auth import AuthService
 from app.services.project import ProjectService
+from app.services.workspace import WorkspaceService
 
 
 def get_project_repository(
@@ -90,6 +91,24 @@ def get_workspace_repository(
 WorkspaceRepositoryDep = Annotated[
     WorkspaceRepository,
     Depends(get_workspace_repository),
+]
+
+
+def get_workspace_service(
+    workspace_repository: WorkspaceRepositoryDep,
+    user_repository: UserRepositoryDep,
+) -> WorkspaceService:
+    """Create workspace service with injected repositories."""
+
+    return WorkspaceService(
+        workspace_repository=workspace_repository,
+        user_repository=user_repository,
+    )
+
+
+WorkspaceServiceDep = Annotated[
+    WorkspaceService,
+    Depends(get_workspace_service),
 ]
 
 

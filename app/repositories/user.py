@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import User
@@ -24,3 +24,15 @@ class UserRepository(BaseRepository[User]):
         statement = select(User).where(User.id == user_id)
         result = await self.session.scalar(statement)
         return result
+
+    async def count_active_admins(self) -> int:
+        """Count active admin users."""
+        from app.models.enums import UserRole
+
+        statement = select(func.count()).select_from(User).where(
+            User.role == UserRole.ADMIN,
+            User.is_active.is_(True),
+        )
+
+        result = await self.session.scalar(statement)
+        return result or 0
