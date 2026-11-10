@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 
 class Project(Base):
+    """Project model."""
+
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(
@@ -24,8 +26,9 @@ class Project(Base):
 
     workspace_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("workspaces.id"),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
 
     name: Mapped[str] = mapped_column(
@@ -56,8 +59,10 @@ class Project(Base):
 
     tasks: Mapped[list["Task"]] = relationship(
         back_populates="project",
+        passive_deletes="all",
     )
 
     labels: Mapped[list["Label"]] = relationship(
         back_populates="project",
+        passive_deletes="all",
     )

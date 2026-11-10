@@ -1,8 +1,11 @@
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import messages
+from app.core.exceptions import ConflictError
 from app.models.base import Base
 
 
@@ -44,7 +47,6 @@ class BaseRepository[ModelType: Base]:
         """Get paginated records and the total record count."""
         if page < 1:
             raise ValueError("Page must be greater than or equal to 1")
-
         if limit < 1:
             raise ValueError("Limit must be greater than or equal to 1")
 
@@ -91,7 +93,11 @@ class BaseRepository[ModelType: Base]:
         if db_obj is None:
             return False
 
-        await self.session.delete(db_obj)
-        await self.session.commit()
+        try:
+            await self.session.delete(db_obj)
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise ConflictError(messages.CANNOT_DELETE_REFERENCED_RESOURCE) from exc
 
         return True

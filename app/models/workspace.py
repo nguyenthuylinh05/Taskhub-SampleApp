@@ -27,14 +27,15 @@ workspace_members = Table(
     Column(
         "workspace_id",
         Integer,
-        ForeignKey("workspaces.id"),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
         "user_id",
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
+        index=True,
     ),
     Column(
         "role",
@@ -62,8 +63,9 @@ class Workspace(Base):
 
     owner_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
+        index=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -75,13 +77,16 @@ class Workspace(Base):
     owner: Mapped["User"] = relationship(
         back_populates="owned_workspaces",
         foreign_keys=[owner_id],
+        passive_deletes="all",
     )
 
     members: Mapped[list["User"]] = relationship(
         secondary=workspace_members,
         back_populates="member_workspaces",
+        passive_deletes=True,
     )
 
     projects: Mapped[list["Project"]] = relationship(
         back_populates="workspace",
+        passive_deletes="all",
     )
