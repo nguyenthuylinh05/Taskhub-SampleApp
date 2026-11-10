@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 
 class Comment(Base):
+    """Comment model."""
+
     __tablename__ = "comments"
 
     id: Mapped[int] = mapped_column(
@@ -22,14 +24,16 @@ class Comment(Base):
 
     task_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("tasks.id"),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
 
     author_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
+        index=True,
     )
 
     content: Mapped[str] = mapped_column(
@@ -47,4 +51,6 @@ class Comment(Base):
         back_populates="comments",
     )
 
-    author: Mapped["User"] = relationship()
+    author: Mapped["User"] = relationship(
+        passive_deletes="all",
+    )

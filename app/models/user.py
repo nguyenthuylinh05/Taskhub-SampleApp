@@ -60,9 +60,11 @@ class User(Base):
     owned_workspaces: Mapped[list["Workspace"]] = relationship(
         back_populates="owner",
         foreign_keys="Workspace.owner_id",
+        passive_deletes="all",
     )
 
     member_workspaces: Mapped[list["Workspace"]] = relationship(
         secondary="workspace_members",
         back_populates="members",
+        passive_deletes=True,
     )
