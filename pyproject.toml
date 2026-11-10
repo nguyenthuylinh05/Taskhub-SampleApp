@@ -18,6 +18,8 @@ dependencies = [
     "pwdlib[argon2]>=0.3.1",
     "pyjwt>=2.8.0",
     "redis>=5.0.0",
+    "pydantic-settings>=2.16.2",
+    "email-validator>=2.3.0",
 ]
 
 [project.optional-dependencies]
@@ -61,3 +63,10 @@ asyncio_default_fixture_loop_scope = "function"
 python_version = "3.12"
 strict = true
 mypy_path = "."
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+]

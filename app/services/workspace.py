@@ -1,7 +1,7 @@
 from app.core.exceptions import (
     ConflictError,
     InvalidOperation,
-    ResourceNotFound,
+    NotFoundException,
 )
 from app.models import User, WorkspaceRole
 from app.repositories.user import UserRepository
@@ -65,7 +65,7 @@ class WorkspaceService:
         workspace = await self.workspace_repository.get_by_id(workspace_id)
 
         if workspace is None:
-            raise ResourceNotFound()
+            raise NotFoundException()
 
         return WorkspaceResponse.model_validate(workspace)
 
@@ -82,7 +82,7 @@ class WorkspaceService:
         )
 
         if workspace is None:
-            raise ResourceNotFound()
+            raise NotFoundException()
 
         return WorkspaceResponse.model_validate(workspace)
 
@@ -92,7 +92,7 @@ class WorkspaceService:
         deleted = await self.workspace_repository.delete(workspace_id)
 
         if not deleted:
-            raise ResourceNotFound()
+            raise NotFoundException()
 
     async def add_member(
         self,
@@ -105,7 +105,7 @@ class WorkspaceService:
         workspace = await self.workspace_repository.get_by_id(workspace_id)
 
         if workspace is None:
-            raise ResourceNotFound()
+            raise NotFoundException()
 
         if role == WorkspaceRole.OWNER:
             raise InvalidOperation("Workspace owner cannot be addedas a member")
@@ -113,7 +113,7 @@ class WorkspaceService:
         user = await self.user_repository.get_by_id(user_id)
 
         if user is None:
-            raise ResourceNotFound()
+            raise NotFoundException()
 
         existing_role = await self.workspace_repository.get_member(
             workspace_id,
@@ -147,7 +147,7 @@ class WorkspaceService:
         workspace = await self.workspace_repository.get_by_id(workspace_id)
 
         if workspace is None:
-            raise ResourceNotFound()
+            raise NotFoundException()
 
         if workspace.owner_id == user_id:
             raise InvalidOperation("Workspace owner cannot be removed")
@@ -158,4 +158,4 @@ class WorkspaceService:
         )
 
         if not removed:
-            raise ResourceNotFound()
+            raise NotFoundException()

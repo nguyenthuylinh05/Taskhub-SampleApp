@@ -10,8 +10,8 @@ from app.core.database import get_db_session
 from app.core.exceptions import (
     InactiveUser,
     InvalidCredentials,
+    NotFoundException,
     PermissionDenied,
-    ResourceNotFound,
 )
 from app.core.security import decode_token
 from app.models import User, UserRole, Workspace, WorkspaceRole, workspace_members
@@ -64,7 +64,7 @@ async def get_workspace_role(
     workspace = await session.get(Workspace, workspace_id)
 
     if workspace is None:
-        raise ResourceNotFound()
+        raise NotFoundException()
 
     # System administrator has access to every workspace.
     if current_user.role == UserRole.ADMIN:
@@ -83,7 +83,7 @@ async def get_workspace_role(
     role = result.scalar_one_or_none()
 
     if role is None:
-        raise ResourceNotFound()
+        raise NotFoundException()
 
     return WorkspaceRole(role)
 

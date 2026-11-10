@@ -13,7 +13,7 @@ from app.core.dependencies import (
     WorkspaceRepositoryDep,
     WorkspaceServiceDep,
 )
-from app.core.exceptions import ResourceNotFound
+from app.core.exceptions import NotFoundException
 from app.models import User, WorkspaceRole
 from app.schemas.workspace import (
     WorkspaceCreate,
@@ -150,7 +150,7 @@ async def get_workspace_members(
     workspace = await workspace_repository.get_by_id(workspace_id)
 
     if workspace is None:
-        raise ResourceNotFound()
+        raise NotFoundException()
 
     members = await workspace_repository.get_workspace_members(workspace_id)
 

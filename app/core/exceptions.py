@@ -64,12 +64,15 @@ class PermissionDenied(AppException):
         )
 
 
-class ResourceNotFound(AppException):
-    """Raised when a resource does not exist or is not accessible."""
+class NotFoundException(AppException):
+    """Raised when a requested resource does not exist."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        message: str = "Resource not found",
+    ) -> None:
         super().__init__(
-            message="Resource not found",
+            message=message,
             status_code=status.HTTP_404_NOT_FOUND,
         )
 

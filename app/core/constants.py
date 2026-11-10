@@ -1,0 +1,6 @@
+"""Application-wide constants."""
+
+# Project
+PROJECT_NAME_MIN_LENGTH = 1
+PROJECT_NAME_MAX_LENGTH = 100
+PROJECT_DESCRIPTION_MAX_LENGTH = 500
