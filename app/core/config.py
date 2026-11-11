@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: SecretStr
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
+    TEST_POSTGRES_DB: str = "taskhub_test_db"
 
     # JWT
     JWT_SECRET_KEY: SecretStr
@@ -69,6 +70,10 @@ class Settings(BaseSettings):
             port=self.POSTGRES_PORT,
             database=self.POSTGRES_DB,
         )
+
+    @property
+    def TEST_DATABASE_URL(self) -> URL:
+        return self.DATABASE_URL.set(database=self.TEST_POSTGRES_DB)
 
     @property
     def REDIS_URL(self) -> str:

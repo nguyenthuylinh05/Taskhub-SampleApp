@@ -1,12 +1,12 @@
-from typing import Annotated, cast
+from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.repositories.comment import CommentRepository
 from app.repositories.label import LabelRepository
-from app.repositories.project import InMemoryProjectRepository
+from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
@@ -14,20 +14,22 @@ from app.services.auth import AuthService
 from app.services.project import ProjectService
 from app.services.workspace import WorkspaceService
 
+DatabaseSessionDep = Annotated[
+    AsyncSession,
+    Depends(get_db_session),
+]
+
 
 def get_project_repository(
-    request: Request,
-) -> InMemoryProjectRepository:
-    """Get project repository from application state."""
+    session: DatabaseSessionDep,
+) -> ProjectRepository:
+    """Get project repository."""
 
-    return cast(
-        InMemoryProjectRepository,
-        request.app.state.project_repository,
-    )
+    return ProjectRepository(session)
 
 
 ProjectRepositoryDep = Annotated[
-    InMemoryProjectRepository,
+    ProjectRepository,
     Depends(get_project_repository),
 ]
 
@@ -43,12 +45,6 @@ def get_project_service(
 ProjectServiceDep = Annotated[
     ProjectService,
     Depends(get_project_service),
-]
-
-
-DatabaseSessionDep = Annotated[
-    AsyncSession,
-    Depends(get_db_session),
 ]
 
 

@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from app.api.dependencies import (
-    get_workspace_role,
+    WorkspaceAccess,
+    get_workspace_access,
     require_workspace_editor,
     require_workspace_member,
     require_workspace_owner,
@@ -12,6 +13,14 @@ from app.api.dependencies import (
 from app.core.exceptions import NotFoundException, PermissionDenied
 from app.models import User, UserRole, Workspace, WorkspaceRole
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def make_access(role: WorkspaceRole) -> WorkspaceAccess:
+    workspace = cast(
+        Workspace,
+        SimpleNamespace(id=10, owner_id=1),
+    )
+    return WorkspaceAccess(workspace=workspace, role=role)
 
 
 @pytest.mark.asyncio
@@ -27,15 +36,15 @@ async def test_admin_has_owner_role() -> None:
 
     session_mock = AsyncMock(spec=AsyncSession)
     session_mock.get.return_value = workspace
-    session = cast(AsyncSession, session_mock)
 
-    role = await get_workspace_role(
+    access = await get_workspace_access(
         workspace_id=10,
         current_user=user,
-        session=session,
+        session=cast(AsyncSession, session_mock),
     )
 
-    assert role == WorkspaceRole.OWNER
+    assert access.workspace == workspace
+    assert access.role == WorkspaceRole.OWNER
     session_mock.execute.assert_not_awaited()
 
 
@@ -52,15 +61,14 @@ async def test_workspace_owner_has_owner_role() -> None:
 
     session_mock = AsyncMock(spec=AsyncSession)
     session_mock.get.return_value = workspace
-    session = cast(AsyncSession, session_mock)
 
-    role = await get_workspace_role(
+    access = await get_workspace_access(
         workspace_id=10,
         current_user=user,
-        session=session,
+        session=cast(AsyncSession, session_mock),
     )
 
-    assert role == WorkspaceRole.OWNER
+    assert access.role == WorkspaceRole.OWNER
     session_mock.execute.assert_not_awaited()
 
 
@@ -81,15 +89,15 @@ async def test_workspace_member_gets_membership_role() -> None:
     session_mock = AsyncMock(spec=AsyncSession)
     session_mock.get.return_value = workspace
     session_mock.execute.return_value = result
-    session = cast(AsyncSession, session_mock)
 
-    role = await get_workspace_role(
+    access = await get_workspace_access(
         workspace_id=10,
         current_user=user,
-        session=session,
+        session=cast(AsyncSession, session_mock),
     )
 
-    assert role == WorkspaceRole.EDITOR
+    assert access.workspace == workspace
+    assert access.role == WorkspaceRole.EDITOR
     session_mock.execute.assert_awaited_once()
 
 
@@ -110,13 +118,12 @@ async def test_non_member_cannot_access_workspace() -> None:
     session_mock = AsyncMock(spec=AsyncSession)
     session_mock.get.return_value = workspace
     session_mock.execute.return_value = result
-    session = cast(AsyncSession, session_mock)
 
     with pytest.raises(NotFoundException):
-        await get_workspace_role(
+        await get_workspace_access(
             workspace_id=10,
             current_user=user,
-            session=session,
+            session=cast(AsyncSession, session_mock),
         )
 
 
@@ -129,13 +136,12 @@ async def test_nonexistent_workspace_returns_not_found() -> None:
 
     session_mock = AsyncMock(spec=AsyncSession)
     session_mock.get.return_value = None
-    session = cast(AsyncSession, session_mock)
 
     with pytest.raises(NotFoundException):
-        await get_workspace_role(
+        await get_workspace_access(
             workspace_id=999,
             current_user=user,
-            session=session,
+            session=cast(AsyncSession, session_mock),
         )
 
     session_mock.execute.assert_not_awaited()
@@ -143,32 +149,42 @@ async def test_nonexistent_workspace_returns_not_found() -> None:
 
 @pytest.mark.asyncio
 async def test_viewer_can_read_workspace() -> None:
-    role = await require_workspace_member(WorkspaceRole.VIEWER)
+    access = make_access(WorkspaceRole.VIEWER)
 
-    assert role == WorkspaceRole.VIEWER
+    result = await require_workspace_member(access)
+
+    assert result.role == WorkspaceRole.VIEWER
 
 
 @pytest.mark.asyncio
 async def test_editor_can_edit_workspace() -> None:
-    role = await require_workspace_editor(WorkspaceRole.EDITOR)
+    access = make_access(WorkspaceRole.EDITOR)
 
-    assert role == WorkspaceRole.EDITOR
+    result = await require_workspace_editor(access)
+
+    assert result.role == WorkspaceRole.EDITOR
 
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_edit_workspace() -> None:
+    access = make_access(WorkspaceRole.VIEWER)
+
     with pytest.raises(PermissionDenied):
-        await require_workspace_editor(WorkspaceRole.VIEWER)
+        await require_workspace_editor(access)
 
 
 @pytest.mark.asyncio
 async def test_editor_cannot_manage_workspace() -> None:
+    access = make_access(WorkspaceRole.EDITOR)
+
     with pytest.raises(PermissionDenied):
-        await require_workspace_owner(WorkspaceRole.EDITOR)
+        await require_workspace_owner(access)
 
 
 @pytest.mark.asyncio
 async def test_owner_can_manage_workspace() -> None:
-    role = await require_workspace_owner(WorkspaceRole.OWNER)
+    access = make_access(WorkspaceRole.OWNER)
 
-    assert role == WorkspaceRole.OWNER
+    result = await require_workspace_owner(access)
+
+    assert result.role == WorkspaceRole.OWNER

@@ -1,45 +1,43 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.api.dependencies import (
+    WorkspaceAccess,
     get_current_user,
     require_workspace_editor,
     require_workspace_member,
     require_workspace_owner,
 )
-from app.core.dependencies import (
-    UserRepositoryDep,
-    WorkspaceRepositoryDep,
-    WorkspaceServiceDep,
+from app.core.constants import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_LIMIT,
+    MAX_PAGE_LIMIT,
 )
-from app.core.exceptions import NotFoundException
-from app.models import User, WorkspaceRole
+from app.core.dependencies import WorkspaceServiceDep
+from app.models import User
 from app.schemas.workspace import (
     WorkspaceCreate,
+    WorkspaceListResponse,
     WorkspaceMemberAdd,
     WorkspaceMemberResponse,
     WorkspaceResponse,
     WorkspaceUpdate,
 )
 
-router = APIRouter(
-    prefix="/workspaces",
-    tags=["Workspaces"],
-)
-
+router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 WorkspaceMemberDep = Annotated[
-    WorkspaceRole,
+    WorkspaceAccess,
     Depends(require_workspace_member),
 ]
 WorkspaceEditorDep = Annotated[
-    WorkspaceRole,
+    WorkspaceAccess,
     Depends(require_workspace_editor),
 ]
 WorkspaceOwnerDep = Annotated[
-    WorkspaceRole,
+    WorkspaceAccess,
     Depends(require_workspace_owner),
 ]
 
@@ -54,36 +52,24 @@ async def create_workspace(
     current_user: CurrentUserDep,
     service: WorkspaceServiceDep,
 ) -> WorkspaceResponse:
-    """Create a workspace."""
-
     return await service.create_workspace(data, current_user)
 
 
-@router.get(
-    "",
-    response_model=list[WorkspaceResponse],
-)
+@router.get("", response_model=WorkspaceListResponse)
 async def get_workspaces(
     current_user: CurrentUserDep,
     service: WorkspaceServiceDep,
-) -> list[WorkspaceResponse]:
-    """Get workspaces owned or joined by current user."""
+    page: Annotated[int, Query(ge=1)] = DEFAULT_PAGE,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = DEFAULT_PAGE_LIMIT,
+) -> WorkspaceListResponse:
+    return await service.get_workspaces(current_user, page, limit)
 
-    return await service.get_workspaces(current_user)
 
-
-@router.get(
-    "/{workspace_id}",
-    response_model=WorkspaceResponse,
-)
+@router.get("/{workspace_id}", response_model=WorkspaceResponse)
 async def get_workspace(
-    workspace_id: int,
-    _: WorkspaceMemberDep,
-    service: WorkspaceServiceDep,
+    access: WorkspaceMemberDep,
 ) -> WorkspaceResponse:
-    """Get workspace details."""
-
-    return await service.get_workspace(workspace_id)
+    return WorkspaceResponse.model_validate(access.workspace)
 
 
 @router.patch(
@@ -93,11 +79,9 @@ async def get_workspace(
 async def update_workspace(
     workspace_id: int,
     data: WorkspaceUpdate,
-    _: WorkspaceOwnerDep,
+    _: WorkspaceEditorDep,
     service: WorkspaceServiceDep,
 ) -> WorkspaceResponse:
-    """Update workspace. Only owner or admin."""
-
     return await service.update_workspace(workspace_id, data)
 
 
@@ -110,8 +94,6 @@ async def delete_workspace(
     _: WorkspaceOwnerDep,
     service: WorkspaceServiceDep,
 ) -> None:
-    """Delete workspace. Only owner or admin."""
-
     await service.delete_workspace(workspace_id)
 
 
@@ -126,8 +108,6 @@ async def add_workspace_member(
     _: WorkspaceOwnerDep,
     service: WorkspaceServiceDep,
 ) -> WorkspaceMemberResponse:
-    """Add a member. Only owner or admin."""
-
     return await service.add_member(
         workspace_id,
         data.user_id,
@@ -142,35 +122,9 @@ async def add_workspace_member(
 async def get_workspace_members(
     workspace_id: int,
     _: WorkspaceMemberDep,
-    workspace_repository: WorkspaceRepositoryDep,
-    user_repository: UserRepositoryDep,
+    service: WorkspaceServiceDep,
 ) -> list[WorkspaceMemberResponse]:
-    """Get workspace members, including the owner."""
-
-    workspace = await workspace_repository.get_by_id(workspace_id)
-
-    if workspace is None:
-        raise NotFoundException()
-
-    members = await workspace_repository.get_workspace_members(workspace_id)
-
-    responses = [
-        WorkspaceMemberResponse(user_id=user.id, role=role)
-        for user, role in members
-    ]
-
-    owner = await user_repository.get_by_id(workspace.owner_id)
-
-    if owner is not None:
-        responses.insert(
-            0,
-            WorkspaceMemberResponse(
-                user_id=owner.id,
-                role=WorkspaceRole.OWNER,
-            ),
-        )
-
-    return responses
+    return await service.get_workspace_members(workspace_id)
 
 
 @router.delete(
@@ -183,6 +137,4 @@ async def remove_workspace_member(
     _: WorkspaceOwnerDep,
     service: WorkspaceServiceDep,
 ) -> None:
-    """Remove a member. Only owner or admin."""
-
     await service.remove_member(workspace_id, user_id)

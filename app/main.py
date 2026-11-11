@@ -8,20 +8,16 @@ from app.core.config import API_V1_PREFIX, APP_NAME, APP_VERSION
 from app.core.database import engine
 from app.core.exception_handlers import app_exception_handler
 from app.core.exceptions import AppException
-from app.repositories.project import InMemoryProjectRepository
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage application startup and shutdown."""
 
-    app.state.project_repository = InMemoryProjectRepository()
-
     try:
         yield
     finally:
         await engine.dispose()
-        del app.state.project_repository
 
 
 app = FastAPI(

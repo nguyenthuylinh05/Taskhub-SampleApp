@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import anyio
 import pytest
-from app.core.config import DATABASE_URL
+from app.core.config import settings
 from app.models import Workspace
 from app.models.workspace import workspace_members
 from fastapi.testclient import TestClient
@@ -83,7 +83,7 @@ def cleanup_workspace(
 
     async def delete_test_workspaces() -> None:
         test_engine = create_async_engine(
-            DATABASE_URL,
+            settings.TEST_DATABASE_URL,
             poolclass=NullPool,
         )
 
@@ -157,26 +157,20 @@ def test_create_and_get_workspace(
     assert response.status_code == 200
     assert response.json()["id"] == workspace["id"]
 
-
-def test_get_user_workspaces(
-    client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
-) -> None:
-    owner = register_user(client, cleanup_user)
-    token = login_user(client, owner)
-
-    workspace = create_workspace(client, token, cleanup_workspace)
-
-    response = client.get(
+    list_response = client.get(
         "/api/v1/workspaces",
         headers=auth_headers(token),
     )
 
-    assert response.status_code == 200
+    assert list_response.status_code == 200
+
+    data = list_response.json()
+    assert data["total"] >= 1
+    assert data["page"] == 1
+    assert data["limit"] == 10
     assert any(
         item["id"] == workspace["id"]
-        for item in response.json()
+        for item in data["items"]
     )
 
 

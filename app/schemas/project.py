@@ -1,5 +1,4 @@
 from datetime import datetime
-from uuid import UUID
 
 from pydantic import ConfigDict, Field, field_validator
 
@@ -23,6 +22,11 @@ class ProjectCreate(BaseSchema):
         description="Project description",
     )
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
 
 class ProjectUpdate(BaseSchema):
     name: str | None = Field(
@@ -37,16 +41,17 @@ class ProjectUpdate(BaseSchema):
 
     @field_validator("name", mode="before")
     @classmethod
-    def reject_explicit_null_name(cls, value: object) -> object:
+    def validate_name(cls, value: object) -> object:
         if value is None:
             raise ValueError("Project name cannot be null")
-        return value
+        return value.strip() if isinstance(value, str) else value
 
 
 class ProjectResponse(BaseSchema):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
+    id: int
+    workspace_id: int
     name: str
     description: str | None
     created_at: datetime

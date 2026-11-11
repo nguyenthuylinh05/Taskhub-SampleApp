@@ -1,60 +1,61 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, PositiveInt, field_validator
 
+from app.core.constants import (
+    WORKSPACE_NAME_MAX_LENGTH,
+    WORKSPACE_NAME_MIN_LENGTH,
+)
 from app.models.enums import WorkspaceRole
+from app.schemas.base import BaseSchema
 
 
-class WorkspaceCreate(BaseModel):
-    """Schema for creating a workspace."""
-
+class WorkspaceCreate(BaseSchema):
     name: str = Field(
-        min_length=1,
-        max_length=255,
-        description="Workspace name",
+        min_length=WORKSPACE_NAME_MIN_LENGTH,
+        max_length=WORKSPACE_NAME_MAX_LENGTH,
     )
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
-class WorkspaceUpdate(BaseModel):
-    """Schema for updating a workspace."""
 
+class WorkspaceUpdate(BaseSchema):
     name: str | None = Field(
         default=None,
-        min_length=1,
-        max_length=255,
-        description="Workspace name",
+        min_length=WORKSPACE_NAME_MIN_LENGTH,
+        max_length=WORKSPACE_NAME_MAX_LENGTH,
     )
 
-    @model_validator(mode="after")
-    def validate_name(self) -> "WorkspaceUpdate":
-        """Reject null name when the field is explicitly provided."""
-
-        if "name" in self.model_fields_set and self.name is None:
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, value: object) -> object:
+        if value is None:
             raise ValueError("Workspace name cannot be null")
+        return value.strip() if isinstance(value, str) else value
 
-        return self
 
-
-class WorkspaceResponse(BaseModel):
-    """Schema for returning workspace information."""
-
-    model_config = ConfigDict(from_attributes=True)
-
+class WorkspaceResponse(BaseSchema):
     id: int
     name: str
     owner_id: int
     created_at: datetime
 
 
-class WorkspaceMemberAdd(BaseModel):
-    """Schema for adding a member to a workspace."""
+class WorkspaceListResponse(BaseSchema):
+    items: list[WorkspaceResponse]
+    total: int
+    page: int
+    limit: int
 
-    user_id: int
+
+class WorkspaceMemberAdd(BaseSchema):
+    user_id: PositiveInt
     role: WorkspaceRole = WorkspaceRole.VIEWER
 
 
-class WorkspaceMemberResponse(BaseModel):
-    """Schema for returning workspace member information."""
-
-    user_id: int
+class WorkspaceMemberResponse(BaseSchema):
+    user_id: PositiveInt
     role: WorkspaceRole

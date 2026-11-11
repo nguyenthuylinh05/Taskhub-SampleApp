@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Annotated
 
 import jwt
@@ -16,6 +17,15 @@ from app.core.exceptions import (
 from app.core.security import decode_token
 from app.models import User, UserRole, Workspace, WorkspaceRole, workspace_members
 from app.repositories.user import UserRepository
+
+
+@dataclass
+class WorkspaceAccess:
+    """Authenticated user's access to a workspace."""
+
+    workspace: Workspace
+    role: WorkspaceRole
+
 
 bearer_scheme = HTTPBearer()
 
@@ -54,12 +64,13 @@ async def get_current_user(
 
     return user
 
-async def get_workspace_role(
+
+async def get_workspace_access(
     workspace_id: int,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> WorkspaceRole:
-    """Get the current user's role in a workspace."""
+) -> WorkspaceAccess:
+    """Get the current user's access to a workspace."""
 
     workspace = await session.get(Workspace, workspace_id)
 
@@ -68,11 +79,11 @@ async def get_workspace_role(
 
     # System administrator has access to every workspace.
     if current_user.role == UserRole.ADMIN:
-        return WorkspaceRole.OWNER
+        return WorkspaceAccess(workspace, WorkspaceRole.OWNER)
 
     # Workspace owner does not need a membership record.
     if workspace.owner_id == current_user.id:
-        return WorkspaceRole.OWNER
+        return WorkspaceAccess(workspace, WorkspaceRole.OWNER)
 
     statement = select(workspace_members.c.role).where(
         workspace_members.c.workspace_id == workspace_id,
@@ -85,45 +96,49 @@ async def get_workspace_role(
     if role is None:
         raise NotFoundException()
 
-    return WorkspaceRole(role)
+    return WorkspaceAccess(workspace, WorkspaceRole(role))
+
 
 async def require_workspace_member(
-    workspace_role: Annotated[
-        WorkspaceRole,
-        Depends(get_workspace_role),
+    workspace_access: Annotated[
+        WorkspaceAccess,
+        Depends(get_workspace_access),
     ],
-) -> WorkspaceRole:
+) -> WorkspaceAccess:
     """Require the user to be a workspace member."""
-    return workspace_role
+
+    return workspace_access
 
 
 async def require_workspace_editor(
-    workspace_role: Annotated[
-        WorkspaceRole,
-        Depends(get_workspace_role),
+    workspace_access: Annotated[
+        WorkspaceAccess,
+        Depends(get_workspace_access),
     ],
-) -> WorkspaceRole:
+) -> WorkspaceAccess:
     """Require OWNER or EDITOR role."""
-    if workspace_role not in (
+
+    if workspace_access.role not in (
         WorkspaceRole.OWNER,
         WorkspaceRole.EDITOR,
     ):
         raise PermissionDenied()
 
-    return workspace_role
+    return workspace_access
 
 
 async def require_workspace_owner(
-    workspace_role: Annotated[
-        WorkspaceRole,
-        Depends(get_workspace_role),
+    workspace_access: Annotated[
+        WorkspaceAccess,
+        Depends(get_workspace_access),
     ],
-) -> WorkspaceRole:
+) -> WorkspaceAccess:
     """Require OWNER role."""
-    if workspace_role != WorkspaceRole.OWNER:
+
+    if workspace_access.role != WorkspaceRole.OWNER:
         raise PermissionDenied()
 
-    return workspace_role
+    return workspace_access
 
 
 async def require_admin(

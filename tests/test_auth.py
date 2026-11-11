@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import anyio
 import jwt
-from app.core.config import DATABASE_URL, JWT_ALGORITHM, JWT_SECRET_KEY
+from app.core.config import JWT_ALGORITHM, JWT_SECRET_KEY, settings
 from app.models import User, UserRole
 from fastapi.testclient import TestClient
 from sqlalchemy import update
@@ -71,7 +71,7 @@ def promote_to_admin(user_id: int) -> None:
 
     async def update_role() -> None:
         test_engine = create_async_engine(
-            DATABASE_URL,
+            settings.TEST_DATABASE_URL,
             poolclass=NullPool,
         )
         session_factory = async_sessionmaker(
@@ -487,17 +487,9 @@ def test_inactive_user_cannot_access_protected_endpoint(
     user_data = register_user(client, cleanup_user)
     access_token = login_user(client, user_data)
 
-    # Deactivate the user directly in the database.
-    import anyio
-    from app.core.config import DATABASE_URL
-    from app.models import User
-    from sqlalchemy import update
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from sqlalchemy.pool import NullPool
-
     async def deactivate_user() -> None:
         test_engine = create_async_engine(
-            DATABASE_URL,
+            settings.TEST_DATABASE_URL,
             poolclass=NullPool,
         )
         session_factory = async_sessionmaker(
@@ -585,7 +577,7 @@ def test_cannot_deactivate_last_active_admin(
     )
 
 
-def test_cannot_delete_last_active_admin(
+def test_can_delete_admin_when_another_active_admin_exists(
     client: TestClient,
     cleanup_user: list[int],
 ) -> None:

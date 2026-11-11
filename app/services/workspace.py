@@ -1,13 +1,24 @@
+from app.core.constants import DEFAULT_PAGE, DEFAULT_PAGE_LIMIT
 from app.core.exceptions import (
     ConflictError,
     InvalidOperation,
     NotFoundException,
+)
+from app.core.messages import (
+    USER_NOT_FOUND,
+    WORKSPACE_MEMBER_ALREADY_EXISTS,
+    WORKSPACE_MEMBER_NOT_FOUND,
+    WORKSPACE_NOT_FOUND,
+    WORKSPACE_OWNER_CANNOT_BE_MEMBER,
+    WORKSPACE_OWNER_CANNOT_BE_REMOVED,
+    WORKSPACE_OWNER_ROLE_INVALID,
 )
 from app.models import User, WorkspaceRole
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.workspace import (
     WorkspaceCreate,
+    WorkspaceListResponse,
     WorkspaceMemberResponse,
     WorkspaceResponse,
     WorkspaceUpdate,
@@ -30,69 +41,84 @@ class WorkspaceService:
         data: WorkspaceCreate,
         current_user: User,
     ) -> WorkspaceResponse:
-        """Create a workspace owned by the current user."""
-
         workspace = await self.workspace_repository.create(
-            {
-                "name": data.name,
-                "owner_id": current_user.id,
-            }
+            {"name": data.name, "owner_id": current_user.id}
         )
-
         return WorkspaceResponse.model_validate(workspace)
 
     async def get_workspaces(
         self,
         current_user: User,
-    ) -> list[WorkspaceResponse]:
-        """Get workspaces owned or joined by the current user."""
-
-        workspaces = await self.workspace_repository.get_user_workspaces(
-            current_user.id
+        page: int = DEFAULT_PAGE,
+        limit: int = DEFAULT_PAGE_LIMIT,
+    ) -> WorkspaceListResponse:
+        workspaces, total = (
+            await self.workspace_repository.get_user_workspaces_paginated(
+                current_user.id,
+                page,
+                limit,
+            )
         )
-
-        return [
-            WorkspaceResponse.model_validate(workspace)
-            for workspace in workspaces
-        ]
+        return WorkspaceListResponse(
+            items=[
+                WorkspaceResponse.model_validate(workspace)
+                for workspace in workspaces
+            ],
+            total=total,
+            page=page,
+            limit=limit,
+        )
 
     async def get_workspace(
         self,
         workspace_id: int,
     ) -> WorkspaceResponse:
-        """Get a workspace by ID."""
-
         workspace = await self.workspace_repository.get_by_id(workspace_id)
-
         if workspace is None:
-            raise NotFoundException()
-
+            raise NotFoundException(WORKSPACE_NOT_FOUND)
         return WorkspaceResponse.model_validate(workspace)
+
+    async def get_workspace_members(
+        self,
+        workspace_id: int,
+    ) -> list[WorkspaceMemberResponse]:
+        workspace = await self.workspace_repository.get_by_id(workspace_id)
+        if workspace is None:
+            raise NotFoundException(WORKSPACE_NOT_FOUND)
+
+        members = await self.workspace_repository.get_workspace_members(
+            workspace_id
+        )
+        responses = [
+            WorkspaceMemberResponse(user_id=user.id, role=role)
+            for user, role in members
+        ]
+        responses.insert(
+            0,
+            WorkspaceMemberResponse(
+                user_id=workspace.owner_id,
+                role=WorkspaceRole.OWNER,
+            ),
+        )
+        return responses
 
     async def update_workspace(
         self,
         workspace_id: int,
         data: WorkspaceUpdate,
     ) -> WorkspaceResponse:
-        """Update a workspace."""
-
         workspace = await self.workspace_repository.update(
             workspace_id,
             data.model_dump(exclude_unset=True),
         )
-
         if workspace is None:
-            raise NotFoundException()
-
+            raise NotFoundException(WORKSPACE_NOT_FOUND)
         return WorkspaceResponse.model_validate(workspace)
 
     async def delete_workspace(self, workspace_id: int) -> None:
-        """Delete a workspace."""
-
         deleted = await self.workspace_repository.delete(workspace_id)
-
         if not deleted:
-            raise NotFoundException()
+            raise NotFoundException(WORKSPACE_NOT_FOUND)
 
     async def add_member(
         self,
@@ -100,62 +126,49 @@ class WorkspaceService:
         user_id: int,
         role: WorkspaceRole,
     ) -> WorkspaceMemberResponse:
-        """Add a user to a workspace."""
-
         workspace = await self.workspace_repository.get_by_id(workspace_id)
-
         if workspace is None:
-            raise NotFoundException()
+            raise NotFoundException(WORKSPACE_NOT_FOUND)
 
         if role == WorkspaceRole.OWNER:
-            raise InvalidOperation("Workspace owner cannot be addedas a member")
+            raise InvalidOperation(WORKSPACE_OWNER_ROLE_INVALID)
+
+        if workspace.owner_id == user_id:
+            raise InvalidOperation(WORKSPACE_OWNER_CANNOT_BE_MEMBER)
 
         user = await self.user_repository.get_by_id(user_id)
-
         if user is None:
-            raise NotFoundException()
+            raise NotFoundException(USER_NOT_FOUND)
 
         existing_role = await self.workspace_repository.get_member(
             workspace_id,
             user_id,
         )
-
         if existing_role is not None:
-            raise ConflictError("User is already a workspace member")
-
-        if workspace.owner_id == user_id:
-            raise InvalidOperation("Workspace owner cannot be assigned as a member")
+            raise ConflictError(WORKSPACE_MEMBER_ALREADY_EXISTS)
 
         await self.workspace_repository.add_member(
             workspace_id,
             user_id,
             role,
         )
-
-        return WorkspaceMemberResponse(
-            user_id=user_id,
-            role=role,
-        )
+        return WorkspaceMemberResponse(user_id=user_id, role=role)
 
     async def remove_member(
         self,
         workspace_id: int,
         user_id: int,
     ) -> None:
-        """Remove a user from a workspace."""
-
         workspace = await self.workspace_repository.get_by_id(workspace_id)
-
         if workspace is None:
-            raise NotFoundException()
+            raise NotFoundException(WORKSPACE_NOT_FOUND)
 
         if workspace.owner_id == user_id:
-            raise InvalidOperation("Workspace owner cannot be removed")
+            raise InvalidOperation(WORKSPACE_OWNER_CANNOT_BE_REMOVED)
 
         removed = await self.workspace_repository.remove_member(
             workspace_id,
             user_id,
         )
-
         if not removed:
-            raise NotFoundException()
+            raise NotFoundException(WORKSPACE_MEMBER_NOT_FOUND)

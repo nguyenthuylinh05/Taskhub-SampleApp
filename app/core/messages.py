@@ -16,3 +16,13 @@ CURRENT_PASSWORD_INCORRECT = "Current password is incorrect"
 NEW_PASSWORD_MUST_BE_DIFFERENT = (
     "New password must be different from current password"
 )
+
+# Workspace
+WORKSPACE_NOT_FOUND = "Workspace not found"
+WORKSPACE_MEMBER_NOT_FOUND = "Workspace member not found"
+WORKSPACE_MEMBER_ALREADY_EXISTS = "User is already a workspace member"
+WORKSPACE_OWNER_CANNOT_BE_MEMBER = (
+    "Workspace owner cannot be assigned as a member"
+)
+WORKSPACE_OWNER_CANNOT_BE_REMOVED = "Workspace owner cannot be removed"
+WORKSPACE_OWNER_ROLE_INVALID = "Workspace owner role cannot be assigned"
