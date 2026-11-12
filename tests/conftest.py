@@ -61,7 +61,12 @@ def client(
 
     async def override_get_db_session() -> AsyncIterator[AsyncSession]:
         async with test_session_local() as session:
-            yield session
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
     app.dependency_overrides[get_db_session] = override_get_db_session
 
@@ -94,14 +99,13 @@ def cleanup_user() -> Generator[list[int], None, None]:
 
         try:
             async with session_factory() as session:
-                await session.execute(
-                    delete(User).where(User.id.in_(user_ids))
-                )
+                await session.execute(delete(User).where(User.id.in_(user_ids)))
                 await session.commit()
         finally:
             await test_engine.dispose()
 
     anyio.run(delete_test_users)
+
 
 @pytest.fixture
 def cleanup_workspace(
@@ -127,9 +131,7 @@ def cleanup_workspace(
         try:
             async with session_factory() as session:
                 await session.execute(
-                    delete(Workspace).where(
-                        Workspace.id.in_(workspace_ids)
-                    )
+                    delete(Workspace).where(Workspace.id.in_(workspace_ids))
                 )
                 await session.commit()
         finally:

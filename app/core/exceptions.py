@@ -97,3 +97,13 @@ class InvalidOperation(AppException):
             message=message,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class CannotDeleteOwnAccount(AppException):
+    """Raised when a user attempts to delete their own account."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            message=messages.CANNOT_DELETE_OWN_ACCOUNT,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )

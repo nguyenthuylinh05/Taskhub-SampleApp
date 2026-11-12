@@ -4,7 +4,9 @@ from uuid import uuid4
 
 import anyio
 import jwt
+import pytest
 from app.core.config import JWT_ALGORITHM, JWT_SECRET_KEY, settings
+from app.core.exceptions import InvalidRefreshToken
 from app.models import User, UserRole
 from fastapi.testclient import TestClient
 from sqlalchemy import update
@@ -82,9 +84,7 @@ def promote_to_admin(user_id: int) -> None:
         try:
             async with session_factory() as session:
                 await session.execute(
-                    update(User)
-                    .where(User.id == user_id)
-                    .values(role=UserRole.ADMIN)
+                    update(User).where(User.id == user_id).values(role=UserRole.ADMIN)
                 )
                 await session.commit()
         finally:
@@ -180,6 +180,49 @@ def test_login_invalid_password(
     )
 
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"type": "refresh", "jti": "test-jti"},
+        {"sub": 123, "type": "refresh", "jti": "test-jti"},
+        {"sub": "not-an-integer", "type": "refresh", "jti": "test-jti"},
+        {"sub": "1", "type": "refresh"},
+        {"sub": "1", "type": "refresh", "jti": 123},
+        {"sub": "1", "type": "access", "jti": "test-jti"},
+    ],
+)
+def test_decode_refresh_token_rejects_invalid_claims(
+    payload: dict[str, object],
+) -> None:
+    from app.services.auth import AuthService
+
+    token = jwt.encode(
+        payload,
+        JWT_SECRET_KEY,
+        algorithm=JWT_ALGORITHM,
+    )
+
+    with pytest.raises(InvalidRefreshToken):
+        AuthService._decode_refresh_token(token)
+
+
+def test_decode_refresh_token_rejects_invalid_signature() -> None:
+    from app.services.auth import AuthService
+
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "type": "refresh",
+            "jti": "test-jti",
+        },
+        "wrong-secret-key-that-is-not-the-real-secret",
+        algorithm=JWT_ALGORITHM,
+    )
+
+    with pytest.raises(InvalidRefreshToken):
+        AuthService._decode_refresh_token(token)
 
 
 def test_refresh_token_success(
@@ -409,6 +452,55 @@ def test_change_password_success(
     )
 
     assert old_password_response.status_code == 401
+
+
+def test_change_password_rolls_back_when_redis_fails(
+    client: TestClient,
+    cleanup_user: list[int],
+    mock_redis: dict[str, AsyncMock],
+) -> None:
+    """Password change must roll back if Redis revocation fails."""
+
+    user_data = register_user(client, cleanup_user)
+    access_token = login_user(client, user_data)
+
+    # Simulate Redis failure after the password has been flushed.
+    mock_redis["revoke_all"].side_effect = RuntimeError("Redis unavailable")
+
+    with pytest.raises(RuntimeError, match="Redis unavailable"):
+        client.post(
+            "/api/v1/users/me/change-password",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "current_password": "TestPassword123",
+                "new_password": "NewPassword123",
+            },
+        )
+
+    mock_redis["revoke_all"].assert_awaited_once_with(str(user_data["id"]))
+
+    # The old password must remain valid because the transaction rolled back.
+    old_password_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": user_data["email"],
+            "password": "TestPassword123",
+        },
+    )
+
+    assert old_password_response.status_code == 200
+
+    # The new password must not have been committed.
+    new_password_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": user_data["email"],
+            "password": "NewPassword123",
+        },
+    )
+
+    assert new_password_response.status_code == 401
+
 
 def test_change_password_wrong_current_password(
     client: TestClient,

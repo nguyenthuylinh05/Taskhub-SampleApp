@@ -1,3 +1,5 @@
+from typing import Any
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +40,7 @@ class ProjectRepository(BaseRepository[Project]):
         self,
         project_id: int,
         workspace_id: int,
-        data: dict,
+        data: dict[str, Any],
     ) -> Project | None:
         project = await self.get_in_workspace(project_id, workspace_id)
 
@@ -49,7 +51,7 @@ class ProjectRepository(BaseRepository[Project]):
             if hasattr(project, key):
                 setattr(project, key, value)
 
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(project)
         return project
 
@@ -58,10 +60,14 @@ class ProjectRepository(BaseRepository[Project]):
         project_id: int,
         workspace_id: int,
     ) -> bool:
-        statement = delete(Project).where(
-            Project.id == project_id,
-            Project.workspace_id == workspace_id,
+        statement = (
+            delete(Project)
+            .where(
+                Project.id == project_id,
+                Project.workspace_id == workspace_id,
+            )
+            .returning(Project.id)
         )
         result = await self.session.execute(statement)
-        await self.session.commit()
-        return result.rowcount > 0
+
+        return result.scalar_one_or_none() is not None

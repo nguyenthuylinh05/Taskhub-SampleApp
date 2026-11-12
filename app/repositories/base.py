@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -25,7 +25,7 @@ class BaseRepository[ModelType: Base]:
         db_obj = self.model(**data)
 
         self.session.add(db_obj)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(db_obj)
 
         return db_obj
@@ -55,9 +55,11 @@ class BaseRepository[ModelType: Base]:
         )
         total = total_result or 0
 
+        model_id = cast(Any, self.model).id
+
         statement = (
             select(self.model)
-            .order_by(self.model.id)
+            .order_by(model_id)
             .offset((page - 1) * limit)
             .limit(limit)
         )
@@ -65,6 +67,21 @@ class BaseRepository[ModelType: Base]:
         result = await self.session.scalars(statement)
 
         return list(result.all()), total
+
+    async def update_entity(
+        self,
+        db_obj: ModelType,
+        data: dict[str, Any],
+    ) -> ModelType:
+        """Update an already loaded database record."""
+        for key, value in data.items():
+            if hasattr(db_obj, key):
+                setattr(db_obj, key, value)
+
+        await self.session.flush()
+        await self.session.refresh(db_obj)
+
+        return db_obj
 
     async def update(
         self,
@@ -77,14 +94,15 @@ class BaseRepository[ModelType: Base]:
         if db_obj is None:
             return None
 
-        for key, value in data.items():
-            if hasattr(db_obj, key):
-                setattr(db_obj, key, value)
+        return await self.update_entity(db_obj, data)
 
-        await self.session.commit()
-        await self.session.refresh(db_obj)
-
-        return db_obj
+    async def delete_entity(self, db_obj: ModelType) -> None:
+        """Delete an already loaded database record."""
+        try:
+            await self.session.delete(db_obj)
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise ConflictError(messages.CANNOT_DELETE_REFERENCED_RESOURCE) from exc
 
     async def delete(self, obj_id: int) -> bool:
         """Delete a database record by its primary key."""
@@ -93,11 +111,5 @@ class BaseRepository[ModelType: Base]:
         if db_obj is None:
             return False
 
-        try:
-            await self.session.delete(db_obj)
-            await self.session.commit()
-        except IntegrityError as exc:
-            await self.session.rollback()
-            raise ConflictError(messages.CANNOT_DELETE_REFERENCED_RESOURCE) from exc
-
+        await self.delete_entity(db_obj)
         return True

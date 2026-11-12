@@ -1,5 +1,5 @@
-from sqlalchemy import delete, func, insert, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError
@@ -22,10 +22,8 @@ class WorkspaceRepository(BaseRepository[Workspace]):
         limit: int,
     ) -> tuple[list[Workspace], int]:
         """Get owned or joined workspaces with pagination."""
-
-        filters = (
-            (Workspace.owner_id == user_id)
-            | (workspace_members.c.user_id == user_id)
+        filters = (Workspace.owner_id == user_id) | (
+            workspace_members.c.user_id == user_id
         )
 
         base_query = (
@@ -44,10 +42,7 @@ class WorkspaceRepository(BaseRepository[Workspace]):
         total = await self.session.scalar(count_query) or 0
 
         statement = (
-            base_query
-            .order_by(Workspace.id)
-            .offset((page - 1) * limit)
-            .limit(limit)
+            base_query.order_by(Workspace.id).offset((page - 1) * limit).limit(limit)
         )
 
         result = await self.session.scalars(statement)
@@ -59,7 +54,6 @@ class WorkspaceRepository(BaseRepository[Workspace]):
         user_id: int,
     ) -> WorkspaceRole | None:
         """Get a user's role in a workspace."""
-
         statement = select(workspace_members.c.role).where(
             workspace_members.c.workspace_id == workspace_id,
             workspace_members.c.user_id == user_id,
@@ -79,26 +73,26 @@ class WorkspaceRepository(BaseRepository[Workspace]):
         role: WorkspaceRole,
     ) -> None:
         """Insert a workspace member."""
-
-        statement = insert(workspace_members).values(
-            workspace_id=workspace_id,
-            user_id=user_id,
-            role=role,
+        statement = (
+            pg_insert(workspace_members)
+            .values(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                role=role,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    workspace_members.c.workspace_id,
+                    workspace_members.c.user_id,
+                ]
+            )
+            .returning(workspace_members.c.user_id)
         )
 
-        try:
-            await self.session.execute(statement)
-            await self.session.commit()
-        except IntegrityError as exc:
-            await self.session.rollback()
+        result = await self.session.execute(statement)
 
-            existing_role = await self.get_member(workspace_id, user_id)
-            if existing_role is not None:
-                raise ConflictError(
-                    WORKSPACE_MEMBER_ALREADY_EXISTS
-                ) from exc
-
-            raise
+        if result.scalar_one_or_none() is None:
+            raise ConflictError(WORKSPACE_MEMBER_ALREADY_EXISTS)
 
     async def remove_member(
         self,
@@ -117,17 +111,13 @@ class WorkspaceRepository(BaseRepository[Workspace]):
         )
 
         result = await self.session.execute(statement)
-        deleted_user_id = result.scalar_one_or_none()
-
-        await self.session.commit()
-        return deleted_user_id is not None
+        return result.scalar_one_or_none() is not None
 
     async def get_workspace_members(
         self,
         workspace_id: int,
     ) -> list[tuple[User, WorkspaceRole]]:
         """Get all members and their roles in a workspace."""
-
         statement = (
             select(User, workspace_members.c.role)
             .join(
@@ -140,7 +130,4 @@ class WorkspaceRepository(BaseRepository[Workspace]):
 
         result = await self.session.execute(statement)
 
-        return [
-            (user, WorkspaceRole(role))
-            for user, role in result.all()
-        ]
+        return [(user, WorkspaceRole(role)) for user, role in result.all()]

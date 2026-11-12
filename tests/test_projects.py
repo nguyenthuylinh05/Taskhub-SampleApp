@@ -48,6 +48,9 @@ def create_test_workspace(
     assert response.status_code == 201
 
     workspace_id = response.json()["id"]
+
+    assert isinstance(workspace_id, int)
+
     cleanup_workspace.append(workspace_id)
     return workspace_id
 
@@ -266,6 +269,7 @@ def test_project_validation(
 
     assert response.status_code == 422
 
+
 def test_viewer_cannot_update_or_delete_project(
     client: TestClient,
     cleanup_user: list[int],
@@ -274,9 +278,7 @@ def test_viewer_cannot_update_or_delete_project(
     _, owner_headers = register_and_login(client, cleanup_user)
     viewer_id, viewer_headers = register_and_login(client, cleanup_user)
 
-    workspace_id = create_test_workspace(
-        client, owner_headers, cleanup_workspace
-    )
+    workspace_id = create_test_workspace(client, owner_headers, cleanup_workspace)
     base_url = f"/api/v1/workspaces/{workspace_id}/projects"
 
     created = client.post(
@@ -316,9 +318,7 @@ def test_editor_can_update_and_delete_project(
     _, owner_headers = register_and_login(client, cleanup_user)
     editor_id, editor_headers = register_and_login(client, cleanup_user)
 
-    workspace_id = create_test_workspace(
-        client, owner_headers, cleanup_workspace
-    )
+    workspace_id = create_test_workspace(client, owner_headers, cleanup_workspace)
     base_url = f"/api/v1/workspaces/{workspace_id}/projects"
 
     added = client.post(
@@ -349,3 +349,95 @@ def test_editor_can_update_and_delete_project(
         headers=editor_headers,
     )
     assert delete_response.status_code == 204
+
+
+def test_update_project_rejects_null_name(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    """A project name cannot be set to null."""
+
+    _, headers = register_and_login(client, cleanup_user)
+    workspace_id = create_test_workspace(
+        client,
+        headers,
+        cleanup_workspace,
+    )
+
+    base_url = f"/api/v1/workspaces/{workspace_id}/projects"
+
+    created = client.post(
+        base_url,
+        headers=headers,
+        json={"name": "Original Project Name"},
+    )
+    assert created.status_code == 201
+
+    project_id = created.json()["id"]
+
+    update_response = client.patch(
+        f"{base_url}/{project_id}",
+        headers=headers,
+        json={"name": None},
+    )
+
+    assert update_response.status_code == 422
+
+    get_response = client.get(
+        f"{base_url}/{project_id}",
+        headers=headers,
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == "Original Project Name"
+
+
+def test_project_name_rejects_whitespace_only(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    """Project names containing only whitespace are invalid."""
+
+    _, headers = register_and_login(client, cleanup_user)
+    workspace_id = create_test_workspace(
+        client,
+        headers,
+        cleanup_workspace,
+    )
+
+    base_url = f"/api/v1/workspaces/{workspace_id}/projects"
+
+    create_response = client.post(
+        base_url,
+        headers=headers,
+        json={"name": "   "},
+    )
+
+    assert create_response.status_code == 422
+
+    created = client.post(
+        base_url,
+        headers=headers,
+        json={"name": "Valid Project"},
+    )
+    assert created.status_code == 201
+
+    project_id = created.json()["id"]
+
+    update_response = client.patch(
+        f"{base_url}/{project_id}",
+        headers=headers,
+        json={"name": "   "},
+    )
+
+    assert update_response.status_code == 422
+
+    get_response = client.get(
+        f"{base_url}/{project_id}",
+        headers=headers,
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == "Valid Project"

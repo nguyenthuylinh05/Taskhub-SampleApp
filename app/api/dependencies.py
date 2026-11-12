@@ -4,10 +4,10 @@ from typing import Annotated
 import jwt
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
+from app.core.dependencies import WorkspaceRepositoryDep
 from app.core.exceptions import (
     InactiveUser,
     InvalidCredentials,
@@ -15,7 +15,7 @@ from app.core.exceptions import (
     PermissionDenied,
 )
 from app.core.security import decode_token
-from app.models import User, UserRole, Workspace, WorkspaceRole, workspace_members
+from app.models import User, UserRole, Workspace, WorkspaceRole
 from app.repositories.user import UserRepository
 
 
@@ -50,6 +50,9 @@ async def get_current_user(
 
         user_id_int = int(user_id)
 
+        if user_id_int <= 0:
+            raise InvalidCredentials()
+
     except (jwt.InvalidTokenError, ValueError):
         raise InvalidCredentials() from None
 
@@ -65,14 +68,20 @@ async def get_current_user(
     return user
 
 
+CurrentUserDep = Annotated[
+    User,
+    Depends(get_current_user),
+]
+
+
 async def get_workspace_access(
     workspace_id: int,
-    current_user: Annotated[User, Depends(get_current_user)],
-    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: CurrentUserDep,
+    workspace_repository: WorkspaceRepositoryDep,
 ) -> WorkspaceAccess:
     """Get the current user's access to a workspace."""
 
-    workspace = await session.get(Workspace, workspace_id)
+    workspace = await workspace_repository.get_by_id(workspace_id)
 
     if workspace is None:
         raise NotFoundException()
@@ -85,18 +94,15 @@ async def get_workspace_access(
     if workspace.owner_id == current_user.id:
         return WorkspaceAccess(workspace, WorkspaceRole.OWNER)
 
-    statement = select(workspace_members.c.role).where(
-        workspace_members.c.workspace_id == workspace_id,
-        workspace_members.c.user_id == current_user.id,
+    role = await workspace_repository.get_member(
+        workspace_id,
+        current_user.id,
     )
-
-    result = await session.execute(statement)
-    role = result.scalar_one_or_none()
 
     if role is None:
         raise NotFoundException()
 
-    return WorkspaceAccess(workspace, WorkspaceRole(role))
+    return WorkspaceAccess(workspace, role)
 
 
 async def require_workspace_member(
@@ -142,7 +148,7 @@ async def require_workspace_owner(
 
 
 async def require_admin(
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: CurrentUserDep,
 ) -> User:
     """Require system administrator role."""
 

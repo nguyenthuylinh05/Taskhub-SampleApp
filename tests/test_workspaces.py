@@ -168,10 +168,7 @@ def test_create_and_get_workspace(
     assert data["total"] >= 1
     assert data["page"] == 1
     assert data["limit"] == 10
-    assert any(
-        item["id"] == workspace["id"]
-        for item in data["items"]
-    )
+    assert any(item["id"] == workspace["id"] for item in data["items"])
 
 
 def test_owner_can_update_and_delete_workspace(
@@ -251,15 +248,11 @@ def test_owner_can_add_list_and_remove_member(
     members = list_response.json()
 
     assert any(
-        item["user_id"] == owner["id"]
-        and item["role"] == "OWNER"
-        for item in members
+        item["user_id"] == owner["id"] and item["role"] == "OWNER" for item in members
     )
 
     assert any(
-        item["user_id"] == member["id"]
-        and item["role"] == "EDITOR"
-        for item in members
+        item["user_id"] == member["id"] and item["role"] == "EDITOR" for item in members
     )
 
     remove_response = client.delete(
@@ -268,6 +261,54 @@ def test_owner_can_add_list_and_remove_member(
     )
 
     assert remove_response.status_code == 204
+
+
+def test_owner_can_delete_workspace_with_projects(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    """Deleting a workspace must cascade to its projects."""
+
+    owner = register_user(client, cleanup_user)
+    token = login_user(client, owner)
+
+    workspace = create_workspace(
+        client,
+        token,
+        cleanup_workspace,
+    )
+    workspace_id = cast(int, workspace["id"])
+
+    # Arrange: create a project inside the workspace.
+    project_response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/projects",
+        headers=auth_headers(token),
+        json={
+            "name": "Project Before Workspace Deletion",
+        },
+    )
+
+    assert project_response.status_code == 201
+
+    # Act: delete the workspace while it still contains a project.
+    delete_response = client.delete(
+        f"/api/v1/workspaces/{workspace_id}",
+        headers=auth_headers(token),
+    )
+
+    # Assert: deletion succeeds because the FK uses ON DELETE CASCADE.
+    assert delete_response.status_code == 204
+
+    cleanup_workspace.remove(workspace_id)
+
+    # The workspace must no longer be accessible.
+    get_response = client.get(
+        f"/api/v1/workspaces/{workspace_id}",
+        headers=auth_headers(token),
+    )
+
+    assert get_response.status_code == 404
 
 
 def test_viewer_cannot_update_workspace(

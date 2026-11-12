@@ -3,8 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 
 from app.api.dependencies import (
+    CurrentUserDep,
     WorkspaceAccess,
-    get_current_user,
     require_workspace_editor,
     require_workspace_member,
     require_workspace_owner,
@@ -15,7 +15,6 @@ from app.core.constants import (
     MAX_PAGE_LIMIT,
 )
 from app.core.dependencies import WorkspaceServiceDep
-from app.models import User
 from app.schemas.workspace import (
     WorkspaceCreate,
     WorkspaceListResponse,
@@ -27,7 +26,6 @@ from app.schemas.workspace import (
 
 router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
 
-CurrentUserDep = Annotated[User, Depends(get_current_user)]
 WorkspaceMemberDep = Annotated[
     WorkspaceAccess,
     Depends(require_workspace_member),
@@ -77,12 +75,11 @@ async def get_workspace(
     response_model=WorkspaceResponse,
 )
 async def update_workspace(
-    workspace_id: int,
     data: WorkspaceUpdate,
-    _: WorkspaceEditorDep,
+    access: WorkspaceEditorDep,
     service: WorkspaceServiceDep,
 ) -> WorkspaceResponse:
-    return await service.update_workspace(workspace_id, data)
+    return await service.update_workspace(access.workspace, data)
 
 
 @router.delete(
@@ -90,11 +87,10 @@ async def update_workspace(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_workspace(
-    workspace_id: int,
-    _: WorkspaceOwnerDep,
+    access: WorkspaceOwnerDep,
     service: WorkspaceServiceDep,
 ) -> None:
-    await service.delete_workspace(workspace_id)
+    await service.delete_workspace(access.workspace)
 
 
 @router.post(
@@ -103,13 +99,12 @@ async def delete_workspace(
     status_code=status.HTTP_201_CREATED,
 )
 async def add_workspace_member(
-    workspace_id: int,
     data: WorkspaceMemberAdd,
-    _: WorkspaceOwnerDep,
+    access: WorkspaceOwnerDep,
     service: WorkspaceServiceDep,
 ) -> WorkspaceMemberResponse:
     return await service.add_member(
-        workspace_id,
+        access.workspace,
         data.user_id,
         data.role,
     )
@@ -120,11 +115,10 @@ async def add_workspace_member(
     response_model=list[WorkspaceMemberResponse],
 )
 async def get_workspace_members(
-    workspace_id: int,
-    _: WorkspaceMemberDep,
+    access: WorkspaceMemberDep,
     service: WorkspaceServiceDep,
 ) -> list[WorkspaceMemberResponse]:
-    return await service.get_workspace_members(workspace_id)
+    return await service.get_workspace_members(access.workspace)
 
 
 @router.delete(
@@ -132,9 +126,8 @@ async def get_workspace_members(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def remove_workspace_member(
-    workspace_id: int,
     user_id: int,
-    _: WorkspaceOwnerDep,
+    access: WorkspaceOwnerDep,
     service: WorkspaceServiceDep,
 ) -> None:
-    await service.remove_member(workspace_id, user_id)
+    await service.remove_member(access.workspace, user_id)

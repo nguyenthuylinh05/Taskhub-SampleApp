@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from app.api.dependencies import (
@@ -12,7 +12,7 @@ from app.api.dependencies import (
 )
 from app.core.exceptions import NotFoundException, PermissionDenied
 from app.models import User, UserRole, Workspace, WorkspaceRole
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.repositories.workspace import WorkspaceRepository
 
 
 def make_access(role: WorkspaceRole) -> WorkspaceAccess:
@@ -34,18 +34,18 @@ async def test_admin_has_owner_role() -> None:
         SimpleNamespace(id=10, owner_id=2),
     )
 
-    session_mock = AsyncMock(spec=AsyncSession)
-    session_mock.get.return_value = workspace
+    repository_mock = AsyncMock(spec=WorkspaceRepository)
+    repository_mock.get_by_id.return_value = workspace
 
     access = await get_workspace_access(
         workspace_id=10,
         current_user=user,
-        session=cast(AsyncSession, session_mock),
+        workspace_repository=repository_mock,
     )
 
     assert access.workspace == workspace
     assert access.role == WorkspaceRole.OWNER
-    session_mock.execute.assert_not_awaited()
+    repository_mock.get_member.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -59,17 +59,17 @@ async def test_workspace_owner_has_owner_role() -> None:
         SimpleNamespace(id=10, owner_id=1),
     )
 
-    session_mock = AsyncMock(spec=AsyncSession)
-    session_mock.get.return_value = workspace
+    repository_mock = AsyncMock(spec=WorkspaceRepository)
+    repository_mock.get_by_id.return_value = workspace
 
     access = await get_workspace_access(
         workspace_id=10,
         current_user=user,
-        session=cast(AsyncSession, session_mock),
+        workspace_repository=repository_mock,
     )
 
     assert access.role == WorkspaceRole.OWNER
-    session_mock.execute.assert_not_awaited()
+    repository_mock.get_member.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -83,22 +83,19 @@ async def test_workspace_member_gets_membership_role() -> None:
         SimpleNamespace(id=10, owner_id=1),
     )
 
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = WorkspaceRole.EDITOR
-
-    session_mock = AsyncMock(spec=AsyncSession)
-    session_mock.get.return_value = workspace
-    session_mock.execute.return_value = result
+    repository_mock = AsyncMock(spec=WorkspaceRepository)
+    repository_mock.get_by_id.return_value = workspace
+    repository_mock.get_member.return_value = WorkspaceRole.EDITOR
 
     access = await get_workspace_access(
         workspace_id=10,
         current_user=user,
-        session=cast(AsyncSession, session_mock),
+        workspace_repository=repository_mock,
     )
 
     assert access.workspace == workspace
     assert access.role == WorkspaceRole.EDITOR
-    session_mock.execute.assert_awaited_once()
+    repository_mock.get_member.assert_awaited_once_with(10, 2)
 
 
 @pytest.mark.asyncio
@@ -112,18 +109,15 @@ async def test_non_member_cannot_access_workspace() -> None:
         SimpleNamespace(id=10, owner_id=1),
     )
 
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = None
-
-    session_mock = AsyncMock(spec=AsyncSession)
-    session_mock.get.return_value = workspace
-    session_mock.execute.return_value = result
+    repository_mock = AsyncMock(spec=WorkspaceRepository)
+    repository_mock.get_by_id.return_value = workspace
+    repository_mock.get_member.return_value = None
 
     with pytest.raises(NotFoundException):
         await get_workspace_access(
             workspace_id=10,
             current_user=user,
-            session=cast(AsyncSession, session_mock),
+            workspace_repository=repository_mock,
         )
 
 
@@ -134,17 +128,17 @@ async def test_nonexistent_workspace_returns_not_found() -> None:
         SimpleNamespace(id=1, role=UserRole.MEMBER),
     )
 
-    session_mock = AsyncMock(spec=AsyncSession)
-    session_mock.get.return_value = None
+    repository_mock = AsyncMock(spec=WorkspaceRepository)
+    repository_mock.get_by_id.return_value = None
 
     with pytest.raises(NotFoundException):
         await get_workspace_access(
             workspace_id=999,
             current_user=user,
-            session=cast(AsyncSession, session_mock),
+            workspace_repository=repository_mock,
         )
 
-    session_mock.execute.assert_not_awaited()
+    repository_mock.get_member.assert_not_awaited()
 
 
 @pytest.mark.asyncio

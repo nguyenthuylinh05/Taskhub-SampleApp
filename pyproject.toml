@@ -60,6 +60,7 @@ addopts = "-ra"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
+plugins = ["pydantic.mypy"]
 python_version = "3.12"
 strict = true
 mypy_path = "."
@@ -67,6 +68,7 @@ mypy_path = "."
 [dependency-groups]
 dev = [
     "httpx2>=2.16.0",
+    "mypy>=2.4.1",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1.post1",
     "ruff>=0.17.4",
