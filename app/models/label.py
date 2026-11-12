@@ -16,19 +16,22 @@ task_labels = Table(
     Column(
         "task_id",
         Integer,
-        ForeignKey("tasks.id"),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
         "label_id",
         Integer,
-        ForeignKey("labels.id"),
+        ForeignKey("labels.id", ondelete="CASCADE"),
         primary_key=True,
+        index=True,
     ),
 )
 
 
 class Label(Base):
+    """Label model."""
+
     __tablename__ = "labels"
 
     id: Mapped[int] = mapped_column(
@@ -39,8 +42,9 @@ class Label(Base):
 
     project_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("projects.id"),
+        ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
 
     name: Mapped[str] = mapped_column(
@@ -60,4 +64,5 @@ class Label(Base):
     tasks: Mapped[list["Task"]] = relationship(
         secondary=task_labels,
         back_populates="labels",
+        passive_deletes=True,
     )

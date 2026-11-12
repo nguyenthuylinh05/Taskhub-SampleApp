@@ -103,14 +103,22 @@ async def test_repository_initialization() -> None:
     """Test repository initialization with an async session."""
 
     async with AsyncSessionLocal() as session:
-        repositories = [
-            (UserRepository(session), User),
-            (WorkspaceRepository(session), Workspace),
-            (TaskRepository(session), Task),
-            (LabelRepository(session), Label),
-            (CommentRepository(session), Comment),
-        ]
+        user_repository = UserRepository(session)
+        assert user_repository.session is session
+        assert user_repository.model is User
 
-        for repository, expected_model in repositories:
-            assert repository.session is session
-            assert repository.model is expected_model
+        workspace_repository = WorkspaceRepository(session)
+        assert workspace_repository.session is session
+        assert workspace_repository.model is Workspace
+
+        task_repository = TaskRepository(session)
+        assert task_repository.session is session
+        assert task_repository.model is Task
+
+        label_repository = LabelRepository(session)
+        assert label_repository.session is session
+        assert label_repository.model is Label
+
+        comment_repository = CommentRepository(session)
+        assert comment_repository.session is session
+        assert comment_repository.model is Comment

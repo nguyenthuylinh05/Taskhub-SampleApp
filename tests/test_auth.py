@@ -2,9 +2,16 @@ from typing import TypedDict, cast
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+import anyio
 import jwt
-from app.core.config import JWT_ALGORITHM, JWT_SECRET_KEY
+import pytest
+from app.core.config import JWT_ALGORITHM, JWT_SECRET_KEY, settings
+from app.core.exceptions import InvalidRefreshToken
+from app.models import User, UserRole
 from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 
 class RegisteredUser(TypedDict):
@@ -59,6 +66,31 @@ def login_user(
     assert response.status_code == 200
 
     return cast(str, response.json()["access_token"])
+
+
+def promote_to_admin(user_id: int) -> None:
+    """Promote a test user to ADMIN directly in the database."""
+
+    async def update_role() -> None:
+        test_engine = create_async_engine(
+            settings.TEST_DATABASE_URL,
+            poolclass=NullPool,
+        )
+        session_factory = async_sessionmaker(
+            test_engine,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with session_factory() as session:
+                await session.execute(
+                    update(User).where(User.id == user_id).values(role=UserRole.ADMIN)
+                )
+                await session.commit()
+        finally:
+            await test_engine.dispose()
+
+    anyio.run(update_role)
 
 
 def test_register_success(
@@ -148,6 +180,49 @@ def test_login_invalid_password(
     )
 
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"type": "refresh", "jti": "test-jti"},
+        {"sub": 123, "type": "refresh", "jti": "test-jti"},
+        {"sub": "not-an-integer", "type": "refresh", "jti": "test-jti"},
+        {"sub": "1", "type": "refresh"},
+        {"sub": "1", "type": "refresh", "jti": 123},
+        {"sub": "1", "type": "access", "jti": "test-jti"},
+    ],
+)
+def test_decode_refresh_token_rejects_invalid_claims(
+    payload: dict[str, object],
+) -> None:
+    from app.services.auth import AuthService
+
+    token = jwt.encode(
+        payload,
+        JWT_SECRET_KEY,
+        algorithm=JWT_ALGORITHM,
+    )
+
+    with pytest.raises(InvalidRefreshToken):
+        AuthService._decode_refresh_token(token)
+
+
+def test_decode_refresh_token_rejects_invalid_signature() -> None:
+    from app.services.auth import AuthService
+
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "type": "refresh",
+            "jti": "test-jti",
+        },
+        "wrong-secret-key-that-is-not-the-real-secret",
+        algorithm=JWT_ALGORITHM,
+    )
+
+    with pytest.raises(InvalidRefreshToken):
+        AuthService._decode_refresh_token(token)
 
 
 def test_refresh_token_success(
@@ -368,6 +443,64 @@ def test_change_password_success(
 
     assert login_response.status_code == 200
 
+    old_password_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": user_data["email"],
+            "password": "TestPassword123",
+        },
+    )
+
+    assert old_password_response.status_code == 401
+
+
+def test_change_password_rolls_back_when_redis_fails(
+    client: TestClient,
+    cleanup_user: list[int],
+    mock_redis: dict[str, AsyncMock],
+) -> None:
+    """Password change must roll back if Redis revocation fails."""
+
+    user_data = register_user(client, cleanup_user)
+    access_token = login_user(client, user_data)
+
+    # Simulate Redis failure after the password has been flushed.
+    mock_redis["revoke_all"].side_effect = RuntimeError("Redis unavailable")
+
+    with pytest.raises(RuntimeError, match="Redis unavailable"):
+        client.post(
+            "/api/v1/users/me/change-password",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "current_password": "TestPassword123",
+                "new_password": "NewPassword123",
+            },
+        )
+
+    mock_redis["revoke_all"].assert_awaited_once_with(str(user_data["id"]))
+
+    # The old password must remain valid because the transaction rolled back.
+    old_password_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": user_data["email"],
+            "password": "TestPassword123",
+        },
+    )
+
+    assert old_password_response.status_code == 200
+
+    # The new password must not have been committed.
+    new_password_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": user_data["email"],
+            "password": "NewPassword123",
+        },
+    )
+
+    assert new_password_response.status_code == 401
+
 
 def test_change_password_wrong_current_password(
     client: TestClient,
@@ -446,13 +579,30 @@ def test_inactive_user_cannot_access_protected_endpoint(
     user_data = register_user(client, cleanup_user)
     access_token = login_user(client, user_data)
 
-    response = client.patch(
-        f"/api/v1/users/{user_data['id']}",
-        json={"is_active": False},
-    )
+    async def deactivate_user() -> None:
+        test_engine = create_async_engine(
+            settings.TEST_DATABASE_URL,
+            poolclass=NullPool,
+        )
+        session_factory = async_sessionmaker(
+            test_engine,
+            expire_on_commit=False,
+        )
 
-    assert response.status_code in (200, 204)
+        try:
+            async with session_factory() as session:
+                await session.execute(
+                    update(User)
+                    .where(User.id == user_data["id"])
+                    .values(is_active=False)
+                )
+                await session.commit()
+        finally:
+            await test_engine.dispose()
 
+    anyio.run(deactivate_user)
+
+    # The previously issued access token must no longer work.
     response = client.get(
         "/api/v1/users/me",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -460,3 +610,81 @@ def test_inactive_user_cannot_access_protected_endpoint(
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Inactive user"
+
+
+def test_admin_cannot_delete_self(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> None:
+    admin = register_user(client, cleanup_user)
+    promote_to_admin(admin["id"])
+    token = login_user(client, admin)
+
+    response = client.delete(
+        f"/api/v1/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "You cannot delete your own account"
+
+
+def test_cannot_demote_last_active_admin(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> None:
+    admin = register_user(client, cleanup_user)
+    promote_to_admin(admin["id"])
+    token = login_user(client, admin)
+
+    response = client.patch(
+        f"/api/v1/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "MEMBER"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Cannot remove or deactivate the last active admin"
+    )
+
+
+def test_cannot_deactivate_last_active_admin(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> None:
+    admin = register_user(client, cleanup_user)
+    promote_to_admin(admin["id"])
+    token = login_user(client, admin)
+
+    response = client.patch(
+        f"/api/v1/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"is_active": False},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Cannot remove or deactivate the last active admin"
+    )
+
+
+def test_can_delete_admin_when_another_active_admin_exists(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> None:
+    admin = register_user(client, cleanup_user)
+    promote_to_admin(admin["id"])
+
+    # Create another active admin to perform the deletion request.
+    second_admin = register_user(client, cleanup_user)
+    promote_to_admin(second_admin["id"])
+    token = login_user(client, second_admin)
+
+    # The second admin is active, so deleting the first admin is allowed.
+    response = client.delete(
+        f"/api/v1/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 204

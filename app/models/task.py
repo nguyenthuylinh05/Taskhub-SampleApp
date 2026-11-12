@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
 
 class Task(Base):
+    """Task model."""
+
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(
@@ -33,14 +35,16 @@ class Task(Base):
 
     project_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("projects.id"),
+        ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
 
     assignee_id: Mapped[int | None] = mapped_column(
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
 
     title: Mapped[str] = mapped_column(
@@ -72,8 +76,9 @@ class Task(Base):
 
     created_by: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
+        index=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -92,13 +97,16 @@ class Task(Base):
 
     creator: Mapped["User"] = relationship(
         foreign_keys=[created_by],
+        passive_deletes="all",
     )
 
     labels: Mapped[list["Label"]] = relationship(
         secondary="task_labels",
         back_populates="tasks",
+        passive_deletes=True,
     )
 
     comments: Mapped[list["Comment"]] = relationship(
         back_populates="task",
+        passive_deletes="all",
     )

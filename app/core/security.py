@@ -11,8 +11,12 @@ from app.core.config import (
     JWT_SECRET_KEY,
     REFRESH_TOKEN_EXPIRE_DAYS,
 )
+from app.models.enums import TokenType
 
 password_hash = PasswordHash.recommended()
+DUMMY_PASSWORD_HASH = password_hash.hash(
+    "dummy-password-for-timing-protection"
+)
 
 
 def hash_password(password: str) -> str:
@@ -42,7 +46,7 @@ def create_access_token(subject: str) -> str:
         "sub": subject,
         "iat": now,
         "exp": expire,
-        "type": "access",
+        "type": TokenType.ACCESS,
     }
 
     return jwt.encode(
@@ -63,7 +67,7 @@ def create_refresh_token(subject: str) -> str:
         "sub": subject,
         "iat": now,
         "exp": expire,
-        "type": "refresh",
+        "type": TokenType.REFRESH,
         "jti": str(uuid4()),
     }
 

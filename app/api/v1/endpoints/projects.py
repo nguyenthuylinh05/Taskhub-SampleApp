@@ -1,24 +1,28 @@
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Response, status
 
-from app.core.dependencies import get_project_service
-from app.schemas.project import (
-    ProjectCreate,
-    ProjectResponse,
-    ProjectUpdate,
+from app.api.dependencies import (
+    WorkspaceAccess,
+    require_workspace_editor,
+    require_workspace_member,
 )
-from app.services.project import ProjectService
+from app.core.dependencies import ProjectServiceDep
+from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 
 router = APIRouter(
-    prefix="/projects",
+    prefix="/workspaces/{workspace_id}/projects",
     tags=["Projects"],
 )
 
-ProjectServiceDep = Annotated[
-    ProjectService,
-    Depends(get_project_service),
+WorkspaceMemberDep = Annotated[
+    WorkspaceAccess,
+    Depends(require_workspace_member),
+]
+
+WorkspaceEditorDep = Annotated[
+    WorkspaceAccess,
+    Depends(require_workspace_editor),
 ]
 
 
@@ -26,75 +30,91 @@ ProjectServiceDep = Annotated[
     "",
     response_model=ProjectResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Create a project",
+    responses={
+        403: {"description": "Insufficient workspace permissions"},
+        404: {"description": "Workspace not found"},
+    },
 )
 async def create_project(
+    workspace_id: int,
     data: ProjectCreate,
     service: ProjectServiceDep,
+    access: WorkspaceEditorDep,
 ) -> ProjectResponse:
-    return await service.create_project(data)
+    return await service.create_project(access.workspace.id, data)
 
 
 @router.get(
     "",
     response_model=list[ProjectResponse],
+    summary="List projects in a workspace",
+    responses={
+        404: {"description": "Workspace not found"},
+    },
 )
 async def get_projects(
+    workspace_id: int,
     service: ProjectServiceDep,
+    access: WorkspaceMemberDep,
 ) -> list[ProjectResponse]:
-    return await service.get_projects()
+    return await service.get_projects(access.workspace.id)
 
 
 @router.get(
     "/{project_id}",
     response_model=ProjectResponse,
+    summary="Get a project",
+    responses={
+        404: {"description": "Project or workspace not found"},
+    },
 )
 async def get_project(
-    project_id: UUID,
+    workspace_id: int,
+    project_id: int,
     service: ProjectServiceDep,
+    access: WorkspaceMemberDep,
 ) -> ProjectResponse:
-    project = await service.get_project(project_id)
-
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
-
-    return project
+    return await service.get_project(access.workspace.id, project_id)
 
 
 @router.patch(
     "/{project_id}",
     response_model=ProjectResponse,
+    summary="Update a project",
+    responses={
+        403: {"description": "Insufficient workspace permissions"},
+        404: {"description": "Project or workspace not found"},
+    },
 )
 async def update_project(
-    project_id: UUID,
+    workspace_id: int,
+    project_id: int,
     data: ProjectUpdate,
     service: ProjectServiceDep,
+    access: WorkspaceEditorDep,
 ) -> ProjectResponse:
-    project = await service.update_project(project_id, data)
-
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
-
-    return project
+    return await service.update_project(
+        access.workspace.id,
+        project_id,
+        data,
+    )
 
 
 @router.delete(
     "/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a project",
+    responses={
+        403: {"description": "Insufficient workspace permissions"},
+        404: {"description": "Project or workspace not found"},
+    },
 )
 async def delete_project(
-    project_id: UUID,
+    workspace_id: int,
+    project_id: int,
     service: ProjectServiceDep,
-) -> None:
-    deleted = await service.delete_project(project_id)
-
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
+    access: WorkspaceEditorDep,
+) -> Response:
+    await service.delete_project(access.workspace.id, project_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

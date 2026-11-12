@@ -1,65 +1,108 @@
-import os
+from functools import lru_cache
 
-from dotenv import load_dotenv
+from pydantic import SecretStr, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
-load_dotenv()
 
-# Application
-APP_NAME = os.getenv("APP_NAME", "TaskHub")
-APP_VERSION = os.getenv("APP_VERSION", "0.1.0")
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-if ENVIRONMENT == "production" and DEBUG:
-    raise RuntimeError("DEBUG must be disabled in production")
-API_V1_PREFIX = os.getenv("API_V1_PREFIX", "/api/v1")
-
-# PostgreSQL
-POSTGRES_DB = os.getenv("POSTGRES_DB", "taskhub_db")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "taskhub_user")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
-POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
-
-if not POSTGRES_PASSWORD:
-    raise RuntimeError("POSTGRES_PASSWORD is not configured")
-
-DATABASE_URL = URL.create(
-    drivername="postgresql+asyncpg",
-    username=POSTGRES_USER,
-    password=POSTGRES_PASSWORD,
-    host=POSTGRES_HOST,
-    port=POSTGRES_PORT,
-    database=POSTGRES_DB,
-)
-
-# JWT
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15")
-)
-REFRESH_TOKEN_EXPIRE_DAYS = int(
-    os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7")
-)
-
-if not JWT_SECRET_KEY or len(JWT_SECRET_KEY) < 32:
-    raise RuntimeError(
-        "JWT_SECRET_KEY must contain at least 32 characters"
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
     )
 
-if JWT_ALGORITHM != "HS256":
-    raise RuntimeError("Only HS256 algorithm is supported")
+    # Application
+    APP_NAME: str = "TaskHub"
+    APP_VERSION: str = "0.1.0"
+    ENVIRONMENT: str = "development"
+    DEBUG: bool = False
+    API_V1_PREFIX: str = "/api/v1"
 
-if ACCESS_TOKEN_EXPIRE_MINUTES <= 0:
-    raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES must be positive")
+    # PostgreSQL
+    POSTGRES_DB: str = "taskhub_db"
+    POSTGRES_USER: str = "taskhub_user"
+    POSTGRES_PASSWORD: SecretStr
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    TEST_POSTGRES_DB: str = "taskhub_test_db"
 
-if REFRESH_TOKEN_EXPIRE_DAYS <= 0:
-    raise RuntimeError("REFRESH_TOKEN_EXPIRE_DAYS must be positive")
+    # JWT
+    JWT_SECRET_KEY: SecretStr
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-# Redis
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+    # Redis
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
 
-REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+    @model_validator(mode="after")
+    def validate_settings(self) -> "Settings":
+        if self.ENVIRONMENT == "production" and self.DEBUG:
+            raise ValueError("DEBUG must be disabled in production")
+
+        if len(self.JWT_SECRET_KEY.get_secret_value()) < 32:
+            raise ValueError(
+                "JWT_SECRET_KEY must contain at least 32 characters"
+            )
+
+        if self.JWT_ALGORITHM != "HS256":
+            raise ValueError("Only HS256 algorithm is supported")
+
+        if self.ACCESS_TOKEN_EXPIRE_MINUTES <= 0:
+            raise ValueError("ACCESS_TOKEN_EXPIRE_MINUTES must be positive")
+
+        if self.REFRESH_TOKEN_EXPIRE_DAYS <= 0:
+            raise ValueError("REFRESH_TOKEN_EXPIRE_DAYS must be positive")
+
+        return self
+
+    @property
+    def DATABASE_URL(self) -> URL:
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD.get_secret_value(),
+            host=self.POSTGRES_HOST,
+            port=self.POSTGRES_PORT,
+            database=self.POSTGRES_DB,
+        )
+
+    @property
+    def TEST_DATABASE_URL(self) -> URL:
+        return self.DATABASE_URL.set(database=self.TEST_POSTGRES_DB)
+
+    @property
+    def REDIS_URL(self) -> str:
+        return (
+            f"redis://{self.REDIS_HOST}:"
+            f"{self.REDIS_PORT}/{self.REDIS_DB}"
+        )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
+
+# Backward-compatible exports for existing modules.
+APP_NAME = settings.APP_NAME
+APP_VERSION = settings.APP_VERSION
+ENVIRONMENT = settings.ENVIRONMENT
+DEBUG = settings.DEBUG
+API_V1_PREFIX = settings.API_V1_PREFIX
+
+DATABASE_URL = settings.DATABASE_URL
+
+JWT_SECRET_KEY = settings.JWT_SECRET_KEY.get_secret_value()
+JWT_ALGORITHM = settings.JWT_ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+REFRESH_TOKEN_EXPIRE_DAYS = settings.REFRESH_TOKEN_EXPIRE_DAYS
+REFRESH_TOKEN_EXPIRE_SECONDS = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+
+REDIS_URL = settings.REDIS_URL
