@@ -4,7 +4,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.v1.router import api_router
+from app.core.config import get_settings
+from app.core.exception_handlers import app_exception_handler
+from app.core.exceptions import AppException
 from app.repositories.project import InMemoryProjectRepository
+
+settings = get_settings()
 
 
 @asynccontextmanager
@@ -23,15 +28,22 @@ async def lifespan(
 
 
 app = FastAPI(
-    title="TaskHub API",
+    title=f"{settings.APP_NAME} API",
     description="Task Management API built with FastAPI",
-    version="0.1.0",
+    version=settings.APP_VERSION,
     lifespan=lifespan,
 )
 
+
+app.add_exception_handler(
+    AppException,
+    app_exception_handler,
+)
+
+
 app.include_router(
     api_router,
-    prefix="/api/v1",
+    prefix=settings.API_V1_PREFIX,
 )
 
 
@@ -42,5 +54,5 @@ app.include_router(
 async def health_check() -> dict[str, str]:
     return {
         "status": "healthy",
-        "application": "TaskHub",
+        "application": settings.APP_NAME,
     }
