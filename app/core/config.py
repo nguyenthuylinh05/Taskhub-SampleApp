@@ -1,24 +1,53 @@
-import os
+"""Application configuration settings."""
 
-from dotenv import load_dotenv
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
-load_dotenv()
 
-POSTGRES_DB = os.getenv("POSTGRES_DB", "taskhub_db")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "taskhub_user")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
-POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
 
-if not POSTGRES_PASSWORD:
-    raise RuntimeError("POSTGRES_PASSWORD is not configured")
+    APP_NAME: str = "TaskHub"
+    APP_VERSION: str = "0.1.0"
+    ENVIRONMENT: str = "development"
+    DEBUG: bool = True
+    API_V1_PREFIX: str = "/api/v1"
 
-DATABASE_URL = URL.create(
-    drivername="postgresql+asyncpg",
-    username=POSTGRES_USER,
-    password=POSTGRES_PASSWORD,
-    host=POSTGRES_HOST,
-    port=POSTGRES_PORT,
-    database=POSTGRES_DB,
-)
+    POSTGRES_DB: str = "taskhub_db"
+    POSTGRES_USER: str = "taskhub_user"
+    POSTGRES_PASSWORD: str
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
+    @property
+    def DATABASE_URL(self) -> URL:
+        """Build the asynchronous PostgreSQL connection URL."""
+
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_HOST,
+            port=self.POSTGRES_PORT,
+            database=self.POSTGRES_DB,
+        )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return cached application settings."""
+
+    return Settings()
+
+
+settings = get_settings()
+DATABASE_URL = settings.DATABASE_URL

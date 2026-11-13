@@ -52,13 +52,24 @@ async def test_user_repository_crud_and_pagination() -> None:
             assert any(item.id == user_id for item in users)
 
             # 4. Test pagination
-            paginated_users, total = await repository.get_paginated(
+            limit = 10
+
+            _, total = await repository.get_paginated(
                 page=1,
-                limit=10,
+                limit=limit,
             )
 
-            assert total >= 1
-            assert len(paginated_users) <= 10
+            last_page = (total - 1) // limit + 1
+
+            paginated_users, paginated_total = (
+                await repository.get_paginated(
+                    page=last_page,
+                    limit=limit,
+                )
+            )
+
+            assert paginated_total == total
+            assert len(paginated_users) <= limit
             assert any(item.id == user_id for item in paginated_users)
 
             # 5. Update user

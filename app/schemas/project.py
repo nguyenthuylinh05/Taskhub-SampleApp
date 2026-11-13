@@ -1,39 +1,53 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator
+
+from app.core.constants import (
+    PROJECT_DESCRIPTION_MAX_LENGTH,
+    PROJECT_NAME_MAX_LENGTH,
+    PROJECT_NAME_MIN_LENGTH,
+)
+from app.schemas.base import BaseSchema
 
 
-class ProjectCreate(BaseModel):
+class ProjectCreate(BaseSchema):
     """Schema for creating a project."""
 
     name: str = Field(
-        min_length=1,
-        max_length=100,
+        min_length=PROJECT_NAME_MIN_LENGTH,
+        max_length=PROJECT_NAME_MAX_LENGTH,
         description="Project name",
     )
     description: str | None = Field(
         default=None,
-        max_length=500,
+        max_length=PROJECT_DESCRIPTION_MAX_LENGTH,
         description="Project description",
     )
 
 
-class ProjectUpdate(BaseModel):
+class ProjectUpdate(BaseSchema):
     """Schema for updating a project."""
 
     name: str | None = Field(
         default=None,
-        min_length=1,
-        max_length=100,
+        min_length=PROJECT_NAME_MIN_LENGTH,
+        max_length=PROJECT_NAME_MAX_LENGTH,
     )
     description: str | None = Field(
         default=None,
-        max_length=500,
+        max_length=PROJECT_DESCRIPTION_MAX_LENGTH,
     )
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def reject_null_name(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Project name cannot be null.")
+        return value
 
-class ProjectResponse(BaseModel):
+
+class ProjectResponse(BaseSchema):
     """Schema for returning project information."""
 
     model_config = ConfigDict(from_attributes=True)

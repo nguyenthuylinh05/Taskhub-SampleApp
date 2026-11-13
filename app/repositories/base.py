@@ -53,7 +53,12 @@ class BaseRepository[ModelType: Base]:
         )
         total = total_result or 0
 
-        statement = select(self.model).offset((page - 1) * limit).limit(limit)
+        statement = (
+            select(self.model)
+            .order_by(self.model.id)
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
 
         result = await self.session.scalars(statement)
 

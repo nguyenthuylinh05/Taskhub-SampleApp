@@ -98,3 +98,50 @@ def test_get_nonexistent_project(client: TestClient) -> None:
     response = client.get(f"/api/v1/projects/{uuid4()}")
 
     assert response.status_code == 404
+
+
+def test_update_nonexistent_project(client: TestClient) -> None:
+    from uuid import uuid4
+
+    response = client.patch(
+        f"/api/v1/projects/{uuid4()}",
+        json={"name": "Updated Name"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Project not found"}
+
+
+def test_delete_nonexistent_project(client: TestClient) -> None:
+    from uuid import uuid4
+
+    response = client.delete(f"/api/v1/projects/{uuid4()}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Project not found"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"name": None},
+        {"name": ""},
+        {"name": "   "},
+    ],
+)
+def test_update_project_invalid_name(
+    client: TestClient,
+    payload: dict[str, str | None],
+) -> None:
+    created = client.post(
+        "/api/v1/projects",
+        json={"name": "Original Name"},
+    )
+    project_id = created.json()["id"]
+
+    response = client.patch(
+        f"/api/v1/projects/{project_id}",
+        json=payload,
+    )
+
+    assert response.status_code == 422
