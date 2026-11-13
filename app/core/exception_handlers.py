@@ -8,9 +8,11 @@ from app.core.exceptions import AppException
 
 async def app_exception_handler(
     request: Request,
-    exc: AppException,
+    exc: Exception,
 ) -> JSONResponse:
-    """Handle application exceptions globally."""
+    """Handle application-wide exceptions."""
+
+    assert isinstance(exc, AppException)
 
     return JSONResponse(
         status_code=exc.status_code,

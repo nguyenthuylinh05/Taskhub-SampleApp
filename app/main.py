@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from app.core.database import engine
 from app.core.exception_handlers import app_exception_handler
 from app.core.exceptions import AppException
 from app.repositories.project import InMemoryProjectRepository
@@ -13,18 +14,16 @@ settings = get_settings()
 
 
 @asynccontextmanager
-async def lifespan(
-    app: FastAPI,
-) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage application startup and shutdown."""
 
-    # Startup
     app.state.project_repository = InMemoryProjectRepository()
 
-    yield
-
-    # Shutdown
-    del app.state.project_repository
+    try:
+        yield
+    finally:
+        await engine.dispose()
+        del app.state.project_repository
 
 
 app = FastAPI(
@@ -34,12 +33,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
 app.add_exception_handler(
     AppException,
     app_exception_handler,
 )
-
 
 app.include_router(
     api_router,
