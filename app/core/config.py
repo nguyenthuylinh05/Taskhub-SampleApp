@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
+    POSTGRES_TEST_DB: str = "taskhub_test_db"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -41,12 +42,21 @@ class Settings(BaseSettings):
             database=self.POSTGRES_DB,
         )
 
+    @property
+    def TEST_DATABASE_URL(self) -> URL:
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_HOST,
+            port=self.POSTGRES_PORT,
+            database=self.POSTGRES_TEST_DB,
+        )
+
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return cached application settings."""
-
-    return Settings()
+    return Settings()  # type: ignore[call-arg]
 
 
 settings = get_settings()

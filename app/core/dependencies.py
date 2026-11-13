@@ -11,6 +11,7 @@ from app.repositories.task import TaskRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.services.project import ProjectService
+from app.services.user import UserService
 
 
 def get_project_repository(
@@ -61,6 +62,20 @@ def get_user_repository(
 UserRepositoryDep = Annotated[
     UserRepository,
     Depends(get_user_repository),
+]
+
+
+def get_user_service(
+    repository: UserRepositoryDep,
+) -> UserService:
+    """Create user service with injected repository."""
+
+    return UserService(repository)
+
+
+UserServiceDep = Annotated[
+    UserService,
+    Depends(get_user_service),
 ]
 
 

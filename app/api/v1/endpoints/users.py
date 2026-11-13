@@ -1,8 +1,14 @@
-from fastapi import APIRouter, HTTPException, Query, Response, status
+"""User API endpoints."""
 
-from app.core.dependencies import UserRepositoryDep
-from app.core.security import hash_password
-from app.schemas.user import UserCreate, UserResponse, UserUpdate
+from fastapi import APIRouter, Query, Response, status
+
+from app.core.dependencies import UserServiceDep
+from app.schemas.user import (
+    UserCreate,
+    UserListResponse,
+    UserResponse,
+    UserUpdate,
+)
 
 router = APIRouter(
     prefix="/users",
@@ -10,56 +16,42 @@ router = APIRouter(
 )
 
 
-@router.get("/")
+@router.get(
+    "/",
+    response_model=UserListResponse,
+)
 async def get_users(
-    repository: UserRepositoryDep,
+    service: UserServiceDep,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=10, ge=1, le=100),
-) -> dict[str, object]:
-    users, total = await repository.get_paginated(
+) -> UserListResponse:
+    """Get a paginated list of users."""
+
+    users, total = await service.get_users(
         page=page,
         limit=limit,
     )
 
-    return {
-        "items": [
-            {
-                "id": user.id,
-                "email": user.email,
-                "full_name": user.full_name,
-                "role": user.role.value,
-                "is_active": user.is_active,
-                "created_at": user.created_at,
-            }
-            for user in users
-        ],
-        "total": total,
-        "page": page,
-        "limit": limit,
-    }
+    return UserListResponse(
+        items=[UserResponse.model_validate(user) for user in users],
+        total=total,
+        page=page,
+        limit=limit,
+    )
 
 
-@router.get("/{user_id}")
+@router.get(
+    "/{user_id}",
+    response_model=UserResponse,
+)
 async def get_user(
     user_id: int,
-    repository: UserRepositoryDep,
-) -> dict[str, object]:
-    user = await repository.get_by_id(user_id)
+    service: UserServiceDep,
+) -> UserResponse:
+    """Get a user by ID."""
 
-    if user is None:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found",
-        )
-
-    return {
-        "id": user.id,
-        "email": user.email,
-        "full_name": user.full_name,
-        "role": user.role.value,
-        "is_active": user.is_active,
-        "created_at": user.created_at,
-    }
+    user = await service.get_user(user_id)
+    return UserResponse.model_validate(user)
 
 
 @router.post(
@@ -69,58 +61,26 @@ async def get_user(
 )
 async def create_user(
     user_data: UserCreate,
-    repository: UserRepositoryDep,
+    service: UserServiceDep,
 ) -> UserResponse:
-    existing_user = await repository.get_by_email(
-        user_data.email,
-    )
+    """Create a new user."""
 
-    if existing_user is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
-        )
-
-    user_data_dict = user_data.model_dump(exclude={"password"})
-    user_data_dict["hashed_password"] = hash_password(
-        user_data.password,
-    )
-
-    user = await repository.create(user_data_dict)
-
+    user = await service.create_user(user_data)
     return UserResponse.model_validate(user)
 
 
-@router.patch("/{user_id}", response_model=UserResponse)
+@router.patch(
+    "/{user_id}",
+    response_model=UserResponse,
+)
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
-    repository: UserRepositoryDep,
+    service: UserServiceDep,
 ) -> UserResponse:
-    update_data = user_data.model_dump(exclude_unset=True)
+    """Update an existing user."""
 
-    if any(value is None for value in update_data.values()):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Update fields cannot be null",
-        )
-
-    if "email" in update_data:
-        existing_user = await repository.get_by_email(update_data["email"])
-        if existing_user is not None and existing_user.id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email already registered",
-            )
-
-    user = await repository.update(user_id, update_data)
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-
+    user = await service.update_user(user_id, user_data)
     return UserResponse.model_validate(user)
 
 
@@ -130,14 +90,10 @@ async def update_user(
 )
 async def delete_user(
     user_id: int,
-    repository: UserRepositoryDep,
+    service: UserServiceDep,
 ) -> Response:
-    deleted = await repository.delete(user_id)
+    """Delete a user."""
 
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+    await service.delete_user(user_id)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

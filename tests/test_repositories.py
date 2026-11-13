@@ -1,117 +1,99 @@
-from uuid import uuid4
-
 import pytest
-from app.core.database import AsyncSessionLocal
 from app.models import Comment, Label, Task, User, Workspace
 from app.repositories.comment import CommentRepository
 from app.repositories.label import LabelRepository
 from app.repositories.task import TaskRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_user_repository_crud_and_pagination() -> None:
+async def test_user_repository_crud_and_pagination(
+    db_session: AsyncSession,
+) -> None:
     """Test user repository CRUD operations and pagination."""
 
-    async with AsyncSessionLocal() as session:
-        repository = UserRepository(session)
-        user_id: int | None = None
+    repository = UserRepository(db_session)
 
-        try:
-            # 1. Create a user
-            email = f"test-{uuid4().hex}@example.com"
+    email = "repository-test@example.com"
 
-            user = await repository.create(
-                {
-                    "email": email,
-                    "full_name": "Repository Test User",
-                    "hashed_password": "test_hashed_password",
-                }
-            )
+    user = await repository.create(
+        {
+            "email": email,
+            "full_name": "Repository Test User",
+            "hashed_password": "test_hashed_password",
+        }
+    )
 
-            user_id = user.id
+    assert user.id is not None
+    assert user.email == email
+    assert user.full_name == "Repository Test User"
 
-            assert user.id is not None
-            assert user.email == email
-            assert user.full_name == "Repository Test User"
+    found_user = await repository.get_by_id(user.id)
 
-            # 2. Get user by ID
-            found_user = await repository.get_by_id(user_id)
+    assert found_user is not None
+    assert found_user.email == email
 
-            assert found_user is not None
-            assert found_user.email == email
+    found_user_by_email = await repository.get_by_email(email)
 
-            found_user_by_email = await repository.get_by_email(email)
-            assert found_user_by_email is not None
-            assert found_user_by_email.id == user_id
+    assert found_user_by_email is not None
+    assert found_user_by_email.id == user.id
 
-            # 3. Get all users
-            users = await repository.get_all()
+    users = await repository.get_all()
 
-            assert any(item.id == user_id for item in users)
+    assert any(item.id == user.id for item in users)
 
-            # 4. Test pagination
-            limit = 10
+    first_page_users, total = await repository.get_paginated(
+        page=1,
+        limit=10,
+    )
 
-            _, total = await repository.get_paginated(
-                page=1,
-                limit=limit,
-            )
+    assert total >= 1
+    assert len(first_page_users) <= 10
 
-            last_page = (total - 1) // limit + 1
+    last_page = (total - 1) // 10 + 1
 
-            paginated_users, paginated_total = (
-                await repository.get_paginated(
-                    page=last_page,
-                    limit=limit,
-                )
-            )
+    last_page_users, last_page_total = await repository.get_paginated(
+        page=last_page,
+        limit=10,
+    )
 
-            assert paginated_total == total
-            assert len(paginated_users) <= limit
-            assert any(item.id == user_id for item in paginated_users)
+    assert last_page_total == total
+    assert len(last_page_users) <= 10
+    assert any(item.id == user.id for item in last_page_users)
 
-            # 5. Update user
-            updated_user = await repository.update(
-                user_id,
-                {"full_name": "Updated Repository Test User"},
-            )
+    updated_user = await repository.update(
+        user.id,
+        {"full_name": "Updated Repository Test User"},
+    )
 
-            assert updated_user is not None
-            assert updated_user.full_name == "Updated Repository Test User"
+    assert updated_user is not None
+    assert updated_user.full_name == "Updated Repository Test User"
 
-            # 6. Delete user
-            deleted = await repository.delete(user_id)
+    deleted = await repository.delete(user.id)
 
-            assert deleted is True
+    assert deleted is True
 
-            deleted_user = await repository.get_by_id(user_id)
+    deleted_user = await repository.get_by_id(user.id)
 
-            assert deleted_user is None
-
-        finally:
-            # Clean up test data if an assertion fails
-            if user_id is not None:
-                existing_user = await repository.get_by_id(user_id)
-
-                if existing_user is not None:
-                    await repository.delete(user_id)
+    assert deleted_user is None
 
 
 @pytest.mark.asyncio
-async def test_repository_initialization() -> None:
+async def test_repository_initialization(
+    db_session: AsyncSession,
+) -> None:
     """Test repository initialization with an async session."""
 
-    async with AsyncSessionLocal() as session:
-        repositories = [
-            (UserRepository(session), User),
-            (WorkspaceRepository(session), Workspace),
-            (TaskRepository(session), Task),
-            (LabelRepository(session), Label),
-            (CommentRepository(session), Comment),
-        ]
+    repositories = [
+        (UserRepository(db_session), User),
+        (WorkspaceRepository(db_session), Workspace),
+        (TaskRepository(db_session), Task),
+        (LabelRepository(db_session), Label),
+        (CommentRepository(db_session), Comment),
+    ]
 
-        for repository, expected_model in repositories:
-            assert repository.session is session
-            assert repository.model is expected_model
+    for repository, expected_model in repositories:
+        assert repository.session is db_session
+        assert repository.model is expected_model

@@ -1,11 +1,10 @@
+"""Generic asynchronous repository for SQLAlchemy models."""
+
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import messages
-from app.core.exceptions import ConflictError
 from app.models.base import Base
 
 
@@ -25,7 +24,7 @@ class BaseRepository[ModelType: Base]:
         db_obj = self.model(**data)
 
         self.session.add(db_obj)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(db_obj)
 
         return db_obj
@@ -57,7 +56,7 @@ class BaseRepository[ModelType: Base]:
 
         statement = (
             select(self.model)
-            .order_by(self.model.id)
+            .order_by(*self.model.__mapper__.primary_key)
             .offset((page - 1) * limit)
             .limit(limit)
         )
@@ -81,7 +80,7 @@ class BaseRepository[ModelType: Base]:
             if hasattr(db_obj, key):
                 setattr(db_obj, key, value)
 
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(db_obj)
 
         return db_obj
@@ -93,11 +92,7 @@ class BaseRepository[ModelType: Base]:
         if db_obj is None:
             return False
 
-        try:
-            await self.session.delete(db_obj)
-            await self.session.commit()
-        except IntegrityError as exc:
-            await self.session.rollback()
-            raise ConflictError(messages.CANNOT_DELETE_REFERENCED_RESOURCE) from exc
+        await self.session.delete(db_obj)
+        await self.session.flush()
 
         return True
