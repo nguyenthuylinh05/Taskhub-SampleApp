@@ -1,32 +1,27 @@
 # TaskHub - Task Management API
 
-TaskHub is a task management backend API built with FastAPI. The project is developed as a learning project to demonstrate clean code practices, layered architecture, dependency injection, API versioning, database integration, and automated testing.
+TaskHub is a task management backend API built with FastAPI. The project is developed as a learning project to demonstrate clean code practices, layered architecture, dependency injection, API versioning, and automated testing.
 
 ## Tech Stack
 
 - Python 3.12
-- FastAPI 0.111+
+- FastAPI
 - Pydantic v2
-- SQLAlchemy 2.x (Async)
-- Alembic
-- PostgreSQL 16
-- Redis 7 (planned integration)
-- Docker & Docker Compose
 - Uvicorn
 - Pytest
+- HTTPX2
 - Ruff
 - MyPy
 
 ## Project Architecture
 
-The project follows a Layered Architecture to separate responsibilities and improve maintainability.
+The application follows a layered architecture to separate responsibilities and improve maintainability, testability, and extensibility.
 
 - **API Layer:** Handles HTTP requests, responses, and routing.
 - **Schema Layer:** Defines request and response data structures using Pydantic.
 - **Service Layer:** Contains application business logic.
 - **Repository Layer:** Handles data access operations.
-- **Model Layer:** Defines database tables and relationships using SQLAlchemy ORM.
-- **Core Layer:** Contains shared configuration, database connections, dependencies, and security components.
+- **Core Layer:** Contains shared configuration, dependencies, and application-level components.
 
 ## Project Structure
 
@@ -38,18 +33,16 @@ Taskhub-SampleApp/
 │   ├── api/
 │   │   └── v1/
 │   │       ├── endpoints/
-│   │       │   ├── projects.py
-│   │       │   └── users.py
 │   │       └── router.py
 │   ├── core/
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── dependencies.py
-│   │   └── security.py
-│   ├── models/
+│   │   └── dependencies.py
 │   ├── repositories/
+│   │   └── project.py
 │   ├── schemas/
+│   │   ├── base.py
+│   │   └── project.py
 │   ├── services/
+│   │   └── project.py
 │   └── main.py
 ├── tests/
 │   ├── test_projects.py
@@ -65,56 +58,98 @@ Taskhub-SampleApp/
 
 ## Getting Started
 
-### 1. Clone Repository
+### Prerequisites
+
+- Python 3.12 or later.
+- Git.
+- uv package manager.
+
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/nguyenthuylinh05/Taskhub-SampleApp.git
 cd Taskhub-SampleApp
 ```
 
-### 2. Create Virtual Environment
+To use the Day 1 implementation:
 
 ```bash
-python -m venv .venv
+git switch day-1-core-setup
 ```
 
-Activate the virtual environment:
+### 2. Install Dependencies
 
-**Windows:**
+Install project dependencies and development tools:
 
 ```bash
-.venv\Scripts\activate
+uv sync --all-extras
 ```
 
-**Linux/macOS:**
+### 3. Configure Environment Variables
+
+Copy the example environment file:
+
+**Windows PowerShell:**
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Review the `.env` file and adjust application settings if necessary.
+
+### 4. Run the Application
 
 ```bash
-source .venv/bin/activate
+python -m uvicorn app.main:app --reload
 ```
 
-### 3. Install Dependencies
+The API will be available at:
+
+- API: http://127.0.0.1:8000
+- Swagger UI: http://127.0.0.1:8000/docs
+- ReDoc: http://127.0.0.1:8000/redoc
+
+## Running Tests
+
+Run the test suite:
 
 ```bash
-pip install -e ".[dev]"
+pytest -v
 ```
 
-### 4. Configure Environment Variables
+Run tests with coverage:
 
-Create a `.env` file in the project root directory.
-
-Example configuration:
-
-```env
-POSTGRES_DB=taskhub_db
-POSTGRES_USER=taskhub_user
-POSTGRES_PASSWORD=your_secure_password
-POSTGRES_PORT=5432
+```bash
+pytest --cov=app --cov-report=term-missing
 ```
 
-Do not commit `.env` because it contains environment-specific configuration and credentials.
+## Code Quality
 
-### 5. Start PostgreSQL with Docker
+Check code style with Ruff:
 
-Make sure Docker Desktop or Docker Engine is running.
+```bash
+ruff check .
+```
 
-Start
+Check formatting:
+
+```bash
+ruff format --check .
+```
+
+Run static type checking:
+
+```bash
+mypy app/
+```
+
+## Development Notes
+
+- The application uses FastAPI dependency injection.
+- API routes are organized under the `/api/v1` version prefix.
+- The repository layer is currently designed to support the initial application architecture.
+- Automated tests are maintained in the `tests/` directory.
+
+## License
+
+This project is developed for educational purposes.
