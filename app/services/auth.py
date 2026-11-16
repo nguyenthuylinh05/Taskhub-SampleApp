@@ -1,22 +1,28 @@
+"""Authentication business logic."""
+
 import jwt
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import REFRESH_TOKEN_EXPIRE_DAYS
+from app.core.constants import SECONDS_PER_DAY
 from app.core.exceptions import (
     EmailAlreadyRegistered,
     InactiveUser,
     InvalidCredentials,
+    InvalidCurrentPassword,
     InvalidRefreshToken,
 )
 from app.core.redis import (
+    revoke_all_refresh_tokens,
     revoke_refresh_token,
     rotate_refresh_token,
     store_refresh_token,
 )
 from app.core.security import (
+    DUMMY_PASSWORD_HASH,
     create_access_token,
     create_refresh_token,
-    decode_token,
+    decode_refresh_token,
     hash_password,
     verify_password,
 )
@@ -28,6 +34,7 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
 )
+from app.schemas.user import ChangePasswordRequest
 
 
 class AuthService:
@@ -44,29 +51,76 @@ class AuthService:
         if existing_user is not None:
             raise EmailAlreadyRegistered()
 
-        hashed_password = hash_password(data.password)
+        hashed_password = await hash_password(data.password)
 
         try:
-            return await self.user_repository.create(
+            user = await self.user_repository.create(
                 {
                     "email": str(data.email),
                     "full_name": data.full_name,
                     "hashed_password": hashed_password,
                 }
             )
+            await self.user_repository.session.commit()
+            return user
+
         except IntegrityError:
             await self.user_repository.session.rollback()
             raise EmailAlreadyRegistered() from None
+
+        except Exception:
+            await self.user_repository.session.rollback()
+            raise
+
+    async def change_password(
+        self,
+        user: User,
+        data: ChangePasswordRequest,
+    ) -> None:
+        """Change a user's password and revoke existing refresh sessions."""
+
+        if not await verify_password(
+            data.current_password,
+            user.hashed_password,
+        ):
+            raise InvalidCurrentPassword()
+
+        if data.current_password == data.new_password:
+            raise InvalidCurrentPassword(
+                "New password must be different from current password"
+            )
+
+        # Revoke existing sessions before changing the password.
+        await revoke_all_refresh_tokens(str(user.id))
+
+        new_hashed_password = await hash_password(data.new_password)
+
+        try:
+            await self.user_repository.update(
+                user.id,
+                {"hashed_password": new_hashed_password},
+            )
+            await self.user_repository.session.commit()
+
+        except Exception:
+            await self.user_repository.session.rollback()
+            raise
 
     async def login(self, data: LoginRequest) -> TokenResponse:
         """Authenticate a user and issue JWT tokens."""
 
         user = await self.user_repository.get_by_email(str(data.email))
 
-        if user is None or not verify_password(
+        if user is None:
+            await verify_password(data.password, DUMMY_PASSWORD_HASH)
+            raise InvalidCredentials()
+
+        password_valid = await verify_password(
             data.password,
             user.hashed_password,
-        ):
+        )
+
+        if not password_valid:
             raise InvalidCredentials()
 
         if not user.is_active:
@@ -75,7 +129,7 @@ class AuthService:
         access_token = create_access_token(str(user.id))
         refresh_token = create_refresh_token(str(user.id))
 
-        refresh_payload = decode_token(refresh_token)
+        refresh_payload = decode_refresh_token(refresh_token)
         jti = refresh_payload.get("jti")
 
         if not isinstance(jti, str):
@@ -84,7 +138,7 @@ class AuthService:
         await store_refresh_token(
             jti=jti,
             user_id=str(user.id),
-            expire_seconds=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+            expire_seconds=REFRESH_TOKEN_EXPIRE_DAYS * SECONDS_PER_DAY,
         )
 
         return TokenResponse(
@@ -96,20 +150,12 @@ class AuthService:
         """Rotate refresh token and issue new access token."""
 
         try:
-            payload = decode_token(data.refresh_token)
+            payload = decode_refresh_token(data.refresh_token)
         except jwt.InvalidTokenError:
             raise InvalidRefreshToken() from None
 
-        user_id = payload.get("sub")
-        token_type = payload.get("type")
-        old_jti = payload.get("jti")
-
-        if (
-            not isinstance(user_id, str)
-            or token_type != "refresh"
-            or not isinstance(old_jti, str)
-        ):
-            raise InvalidRefreshToken()
+        user_id = payload["sub"]
+        old_jti = payload["jti"]
 
         try:
             user_id_int = int(user_id)
@@ -125,7 +171,7 @@ class AuthService:
             raise InactiveUser()
 
         new_refresh_token = create_refresh_token(str(user.id))
-        new_payload = decode_token(new_refresh_token)
+        new_payload = decode_refresh_token(new_refresh_token)
         new_jti = new_payload.get("jti")
 
         if not isinstance(new_jti, str):
@@ -135,7 +181,7 @@ class AuthService:
             old_jti=old_jti,
             new_jti=new_jti,
             user_id=str(user.id),
-            expire_seconds=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+            expire_seconds=REFRESH_TOKEN_EXPIRE_DAYS * SECONDS_PER_DAY,
         )
 
         if not rotated:
@@ -150,20 +196,12 @@ class AuthService:
         """Revoke a refresh token."""
 
         try:
-            payload = decode_token(data.refresh_token)
+            payload = decode_refresh_token(data.refresh_token)
         except jwt.InvalidTokenError:
             raise InvalidRefreshToken() from None
 
-        user_id = payload.get("sub")
-        jti = payload.get("jti")
-        token_type = payload.get("type")
-
-        if (
-            not isinstance(user_id, str)
-            or token_type != "refresh"
-            or not isinstance(jti, str)
-        ):
-            raise InvalidRefreshToken()
+        user_id = payload["sub"]
+        jti = payload["jti"]
 
         try:
             int(user_id)
@@ -173,7 +211,7 @@ class AuthService:
         revoked = await revoke_refresh_token(
             jti=jti,
             user_id=user_id,
-            expire_seconds=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+            expire_seconds=REFRESH_TOKEN_EXPIRE_DAYS * SECONDS_PER_DAY,
         )
 
         if not revoked:

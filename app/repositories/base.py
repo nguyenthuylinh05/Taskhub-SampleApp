@@ -1,3 +1,5 @@
+"""Generic asynchronous repository for SQLAlchemy models."""
+
 from typing import Any
 
 from sqlalchemy import func, select
@@ -22,7 +24,7 @@ class BaseRepository[ModelType: Base]:
         db_obj = self.model(**data)
 
         self.session.add(db_obj)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(db_obj)
 
         return db_obj
@@ -44,7 +46,6 @@ class BaseRepository[ModelType: Base]:
         """Get paginated records and the total record count."""
         if page < 1:
             raise ValueError("Page must be greater than or equal to 1")
-
         if limit < 1:
             raise ValueError("Limit must be greater than or equal to 1")
 
@@ -53,7 +54,12 @@ class BaseRepository[ModelType: Base]:
         )
         total = total_result or 0
 
-        statement = select(self.model).offset((page - 1) * limit).limit(limit)
+        statement = (
+            select(self.model)
+            .order_by(*self.model.__mapper__.primary_key)
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
 
         result = await self.session.scalars(statement)
 
@@ -74,7 +80,7 @@ class BaseRepository[ModelType: Base]:
             if hasattr(db_obj, key):
                 setattr(db_obj, key, value)
 
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(db_obj)
 
         return db_obj
@@ -87,6 +93,6 @@ class BaseRepository[ModelType: Base]:
             return False
 
         await self.session.delete(db_obj)
-        await self.session.commit()
+        await self.session.flush()
 
         return True

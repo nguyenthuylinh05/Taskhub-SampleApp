@@ -1,15 +1,19 @@
-from typing import Annotated
+﻿"""User API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Query, Response, status
+from sqlalchemy.exc import IntegrityError
 
-from app.api.dependencies import get_current_user
-from app.core.dependencies import UserRepositoryDep
-from app.core.redis import revoke_all_refresh_tokens
-from app.core.security import hash_password, verify_password
-from app.models import User
+from app.api.dependencies import CurrentUser
+from app.core.dependencies import AuthServiceDep, UserRepositoryDep, UserServiceDep
+from app.core.exceptions import (
+    EmailAlreadyRegistered,
+    NotFoundException,
+    ValidationException,
+)
 from app.schemas.user import (
     ChangePasswordRequest,
     UserCreate,
+    UserListResponse,
     UserProfileUpdate,
     UserResponse,
     UserUpdate,
@@ -23,8 +27,9 @@ router = APIRouter(
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_profile(
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: CurrentUser,
 ) -> UserResponse:
+    """Get the profile of the currently authenticated user."""
     return UserResponse.model_validate(current_user)
 
 
@@ -34,38 +39,11 @@ async def get_current_user_profile(
 )
 async def change_current_user_password(
     data: ChangePasswordRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
-    repository: UserRepositoryDep,
+    current_user: CurrentUser,
+    auth_service: AuthServiceDep,
 ) -> Response:
-    if not verify_password(
-        data.current_password,
-        current_user.hashed_password,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current password is incorrect",
-        )
-
-    if data.current_password == data.new_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New password must be different from current password",
-        )
-
-    new_hashed_password = hash_password(data.new_password)
-
-    user = await repository.update(
-        current_user.id,
-        {"hashed_password": new_hashed_password},
-    )
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-
-    await revoke_all_refresh_tokens(str(current_user.id))
+    """Change the password of the currently authenticated user."""
+    await auth_service.change_password(current_user, data)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -73,92 +51,73 @@ async def change_current_user_password(
 @router.patch("/me", response_model=UserResponse)
 async def update_current_user_profile(
     user_data: UserProfileUpdate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: CurrentUser,
     repository: UserRepositoryDep,
 ) -> UserResponse:
+    """Update the profile of the currently authenticated user."""
     update_data = user_data.model_dump(exclude_unset=True)
 
     if not update_data:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="At least one field must be provided",
-        )
+        raise ValidationException("At least one field must be provided")
 
     if any(value is None for value in update_data.values()):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Update fields cannot be null",
-        )
+        raise ValidationException("Update fields cannot be null")
 
     if "email" in update_data:
+        update_data["email"] = str(update_data["email"])
+
         existing_user = await repository.get_by_email(update_data["email"])
+
         if existing_user is not None and existing_user.id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email already registered",
-            )
+            raise EmailAlreadyRegistered()
 
-    user = await repository.update(current_user.id, update_data)
+    try:
+        user = await repository.update(current_user.id, update_data)
 
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+        if user is None:
+            raise NotFoundException("User not found")
+
+        await repository.session.commit()
+
+    except IntegrityError as exc:
+        await repository.session.rollback()
+        raise EmailAlreadyRegistered() from exc
+
+    except Exception:
+        await repository.session.rollback()
+        raise
 
     return UserResponse.model_validate(user)
 
 
-@router.get("/")
+@router.get("/", response_model=UserListResponse)
 async def get_users(
-    repository: UserRepositoryDep,
+    service: UserServiceDep,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=10, ge=1, le=100),
-) -> dict[str, object]:
-    users, total = await repository.get_paginated(
+) -> UserListResponse:
+    """Get a paginated list of users."""
+    users, total = await service.get_users(
         page=page,
         limit=limit,
     )
 
-    return {
-        "items": [
-            {
-                "id": user.id,
-                "email": user.email,
-                "full_name": user.full_name,
-                "role": user.role.value,
-                "is_active": user.is_active,
-                "created_at": user.created_at,
-            }
-            for user in users
-        ],
-        "total": total,
-        "page": page,
-        "limit": limit,
-    }
+    return UserListResponse(
+        items=[UserResponse.model_validate(user) for user in users],
+        total=total,
+        page=page,
+        limit=limit,
+    )
 
 
-@router.get("/{user_id}")
+@router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: int,
-    repository: UserRepositoryDep,
-) -> dict[str, object]:
-    user = await repository.get_by_id(user_id)
-
-    if user is None:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found",
-        )
-
-    return {
-        "id": user.id,
-        "email": user.email,
-        "full_name": user.full_name,
-        "role": user.role.value,
-        "is_active": user.is_active,
-        "created_at": user.created_at,
-    }
+    service: UserServiceDep,
+) -> UserResponse:
+    """Get a user by ID."""
+    user = await service.get_user(user_id)
+    return UserResponse.model_validate(user)
 
 
 @router.post(
@@ -168,25 +127,10 @@ async def get_user(
 )
 async def create_user(
     user_data: UserCreate,
-    repository: UserRepositoryDep,
+    service: UserServiceDep,
 ) -> UserResponse:
-    existing_user = await repository.get_by_email(
-        user_data.email,
-    )
-
-    if existing_user is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
-        )
-
-    user_data_dict = user_data.model_dump(exclude={"password"})
-    user_data_dict["hashed_password"] = hash_password(
-        user_data.password,
-    )
-
-    user = await repository.create(user_data_dict)
-
+    """Create a new user."""
+    user = await service.create_user(user_data)
     return UserResponse.model_validate(user)
 
 
@@ -194,32 +138,10 @@ async def create_user(
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
-    repository: UserRepositoryDep,
+    service: UserServiceDep,
 ) -> UserResponse:
-    update_data = user_data.model_dump(exclude_unset=True)
-
-    if any(value is None for value in update_data.values()):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Update fields cannot be null",
-        )
-
-    if "email" in update_data:
-        existing_user = await repository.get_by_email(update_data["email"])
-        if existing_user is not None and existing_user.id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email already registered",
-            )
-
-    user = await repository.update(user_id, update_data)
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-
+    """Update an existing user."""
+    user = await service.update_user(user_id, user_data)
     return UserResponse.model_validate(user)
 
 
@@ -229,14 +151,8 @@ async def update_user(
 )
 async def delete_user(
     user_id: int,
-    repository: UserRepositoryDep,
+    service: UserServiceDep,
 ) -> Response:
-    deleted = await repository.delete(user_id)
-
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-
+    """Delete a user."""
+    await service.delete_user(user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -5,6 +5,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import TokenType
 from app.core.database import get_db_session
 from app.core.exceptions import InactiveUser, InvalidCredentials
 from app.core.security import decode_token
@@ -29,7 +30,7 @@ async def get_current_user(
         user_id = payload.get("sub")
         token_type = payload.get("type")
 
-        if not isinstance(user_id, str) or token_type != "access":
+        if not isinstance(user_id, str) or token_type != TokenType.ACCESS:
             raise InvalidCredentials()
 
         user_id_int = int(user_id)
@@ -47,3 +48,6 @@ async def get_current_user(
         raise InactiveUser()
 
     return user
+
+
+CurrentUser = Annotated[User, Depends(get_current_user)]

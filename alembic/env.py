@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -16,9 +17,14 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Sử dụng DATABASE_URL từ app/core/config.py.
+database_url = os.getenv("TASKHUB_DATABASE_URL")
+
+if database_url is None:
+    database_url = DATABASE_URL.render_as_string(hide_password=False)
+
 config.set_main_option(
     "sqlalchemy.url",
-    DATABASE_URL.render_as_string(hide_password=False),
+    database_url.replace("%", "%%"),
 )
 
 
