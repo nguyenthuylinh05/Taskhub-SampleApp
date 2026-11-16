@@ -1,41 +1,123 @@
 # TaskHub - Task Management API
 
-TaskHub is a task management backend API built with FastAPI. This project is developed as a learning project to demonstrate clean code practices, layered architecture, dependency injection, API versioning, database integration, authentication, authorization, security, and automated testing.
+A RESTful Task Management API built with **FastAPI**, **SQLAlchemy 2.x**, **PostgreSQL**, and **Redis**.
+
+TaskHub provides user authentication, workspace management, role-based access control (RBAC), project management, and asynchronous database operations.
+
+---
 
 ## Tech Stack
 
-- Python 3.12
-- FastAPI 0.111+
-- Pydantic v2
-- SQLAlchemy 2.x (Async)
-- Alembic
-- PostgreSQL 16
-- Redis 7
-- PyJWT
-- Argon2 password hashing
-- Docker & Docker Compose
-- Uvicorn
-- Pytest
-- Ruff
-- MyPy
+| Category | Technology |
+|---|---|
+| Language | Python 3.12+ |
+| Web Framework | FastAPI |
+| Data Validation | Pydantic v2 |
+| ORM | SQLAlchemy 2.x (Async) |
+| Database | PostgreSQL 16 |
+| Database Migrations | Alembic |
+| Cache / Token Storage | Redis 7 |
+| Authentication | JWT (PyJWT) |
+| Password Hashing | pwdlib (Argon2) |
+| Containerization | Docker & Docker Compose |
+| Package Management | uv |
+| Testing | Pytest, HTTPX |
+| Code Formatting / Linting | Ruff |
+| Static Type Checking | MyPy |
 
-## Project Architecture
+---
 
-The project follows a Layered Architecture to separate responsibilities and improve maintainability.
+## Architecture
 
-- **API Layer:** Handles HTTP requests, responses, routing, and authorization dependencies.
-- **Schema Layer:** Defines request and response data structures using Pydantic.
-- **Service Layer:** Contains application business logic.
-- **Repository Layer:** Handles data access operations.
-- **Model Layer:** Defines database tables, relationships, and enums using SQLAlchemy.
-- **Core Layer:** Contains shared configuration, database connections, dependencies, exception handling, Redis integration, and security components.
+TaskHub follows a layered architecture to separate responsibilities and make the application easier to maintain and test.
+
+```text
+Client
+  |
+  v
+FastAPI Application
+  |
+  v
+API Layer (Routers / Dependencies)
+  |
+  v
+Service Layer (Business Logic)
+  |
+  v
+Repository Layer (Database Operations)
+  |
+  v
+SQLAlchemy Async Session
+  |
+  v
+PostgreSQL
+```
+
+### Main Layers
+
+| Layer | Responsibility |
+|---|---|
+| API | Defines HTTP endpoints, validates requests, and returns responses |
+| Dependencies | Provides authentication, authorization, database sessions, and services |
+| Services | Implements application and business logic |
+| Repositories | Encapsulates database queries and CRUD operations |
+| Models | Defines SQLAlchemy database models and relationships |
+| Schemas | Defines Pydantic request and response schemas |
+| Core | Contains configuration, security, exceptions, database setup, and Redis integration |
+
+### Database
+
+- PostgreSQL 16 is used as the primary database.
+- SQLAlchemy 2.x asynchronous ORM is used for database operations.
+- Alembic manages database schema migrations.
+- Integer auto-increment primary keys are used for database entities.
+
+### Repository Pattern
+
+Repositories encapsulate database operations and help separate persistence logic from business logic.
+
+The application uses a generic base repository and specialized repositories for individual entities.
+
+### Service Layer
+
+Services contain business rules and coordinate repository operations.
+
+Examples include:
+
+- Authentication and token management.
+- User management.
+- Workspace and membership management.
+- Project management.
+
+### Database Migrations
+
+Alembic is used to manage database schema changes.
+
+Create a migration:
+
+```bash
+uv run alembic revision --autogenerate -m "migration message"
+```
+
+Apply migrations:
+
+```bash
+uv run alembic upgrade head
+```
+
+Check the current migration:
+
+```bash
+uv run alembic current
+```
+
+---
 
 ## Project Structure
 
 ```text
 Taskhub-SampleApp/
-├── alembic/
-│   └── versions/
+│
 ├── app/
 │   ├── api/
 │   │   ├── dependencies.py
@@ -46,153 +128,121 @@ Taskhub-SampleApp/
 │   │       │   ├── users.py
 │   │       │   └── workspaces.py
 │   │       └── router.py
+│   │
 │   ├── core/
 │   │   ├── config.py
+│   │   ├── constants.py
 │   │   ├── database.py
+│   │   ├── db_errors.py
 │   │   ├── dependencies.py
-│   │   ├── exception_handlers.py
 │   │   ├── exceptions.py
+│   │   ├── exception_handlers.py
+│   │   ├── messages.py
 │   │   ├── redis.py
 │   │   └── security.py
+│   │
 │   ├── models/
-│   ├── repositories/
-│   ├── schemas/
-│   │   ├── auth.py
+│   │   ├── base.py
+│   │   ├── comment.py
+│   │   ├── enums.py
+│   │   ├── label.py
+│   │   ├── project.py
+│   │   ├── task.py
 │   │   ├── user.py
 │   │   └── workspace.py
+│   │
+│   ├── repositories/
+│   │   ├── base.py
+│   │   ├── comment.py
+│   │   ├── label.py
+│   │   ├── project.py
+│   │   ├── task.py
+│   │   ├── user.py
+│   │   └── workspace.py
+│   │
+│   ├── schemas/
+│   │   ├── auth.py
+│   │   ├── base.py
+│   │   ├── project.py
+│   │   ├── user.py
+│   │   └── workspace.py
+│   │
 │   ├── services/
 │   │   ├── auth.py
+│   │   ├── project.py
+│   │   ├── user.py
 │   │   └── workspace.py
+│   │
 │   └── main.py
+│
+├── alembic/
+│   ├── versions/
+│   ├── env.py
+│   └── script.py.mako
+│
 ├── tests/
 │   ├── conftest.py
+│   ├── test_admin_concurrency.py
 │   ├── test_auth.py
 │   ├── test_authorization.py
 │   ├── test_projects.py
+│   ├── test_redis_integration.py
 │   ├── test_repositories.py
+│   ├── test_users.py
 │   └── test_workspaces.py
+│
 ├── .env.example
 ├── .gitignore
 ├── alembic.ini
-├── compose.yaml
+├── docker-compose.yml
 ├── pyproject.toml
-├── uv.lock
-└── README.md
+├── README.md
+└── uv.lock
 ```
+
+---
 
 ## Getting Started
 
-### 1. Clone Repository
+### Prerequisites
+
+Install the following tools before running the application:
+
+- Python 3.12 or later
+- uv
+- Docker Desktop
+- Git
+
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/nguyenthuylinh05/Taskhub-SampleApp.git
 cd Taskhub-SampleApp
 ```
 
-### 2. Create Virtual Environment
-
-Using Python:
+### 2. Install Dependencies
 
 ```bash
-python -m venv .venv
+uv sync --all-groups
 ```
 
-Activate the virtual environment:
-
-**Windows:**
-
-```powershell
-.venv\Scripts\activate
-```
-
-**Linux/macOS:**
-
-```bash
-source .venv/bin/activate
-```
-
-### 3. Install Dependencies
-
-This project uses `uv` for dependency management.
-
-Install `uv` if it is not already installed:
-
-```bash
-pip install uv
-```
-
-Install project dependencies:
-
-```bash
-uv sync --extra dev
-```
-
-Alternatively, install using pip:
-
-```bash
-pip install -e ".[dev]"
-```
-
-### 4. Configure Environment Variables
+### 3. Configure Environment Variables
 
 Create a `.env` file from the example:
-
-**Windows PowerShell:**
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-**Linux/macOS:**
+Update the environment variables in `.env` to match your local configuration.
 
-```bash
-cp .env.example .env
-```
+Make sure the PostgreSQL and Redis connection settings are correct.
 
-Generate a secure JWT secret:
+**Do not commit `.env` or expose secret values in the repository.**
 
-```bash
-uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
+### 4. Start Infrastructure Services
 
-Update `.env` with the generated secret and your database configuration.
-
-Example:
-
-```env
-# Application
-APP_NAME=TaskHub
-APP_VERSION=0.1.0
-ENVIRONMENT=development
-DEBUG=true
-API_V1_PREFIX=/api/v1
-
-# PostgreSQL
-POSTGRES_DB=taskhub_db
-POSTGRES_USER=taskhub_user
-POSTGRES_PASSWORD=your_secure_password
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-
-# JWT
-JWT_SECRET_KEY=your_generated_secret
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=15
-REFRESH_TOKEN_EXPIRE_DAYS=7
-
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-```
-
-Do not commit `.env` because it contains environment-specific configuration and credentials.
-
-### 5. Start PostgreSQL and Redis with Docker
-
-Make sure Docker Desktop or Docker Engine is running.
-
-Start the services:
+Start PostgreSQL and Redis using Docker Compose:
 
 ```bash
 docker compose up -d
@@ -204,21 +254,13 @@ Check running containers:
 docker compose ps
 ```
 
-The application uses PostgreSQL for persistent data storage and Redis for refresh-token session management.
-
-When running the application directly on your host machine, configure the database and Redis hosts according to the exposed Docker ports. When running the application inside Docker Compose, use the corresponding service hostnames.
-
-### 6. Run Database Migrations
-
-Apply Alembic migrations:
+### 5. Run Database Migrations
 
 ```bash
 uv run alembic upgrade head
 ```
 
-### 7. Run the Application
-
-Start the FastAPI development server:
+### 6. Start the Application
 
 ```bash
 uv run uvicorn app.main:app --reload
@@ -226,153 +268,31 @@ uv run uvicorn app.main:app --reload
 
 The API will be available at:
 
-```text
-http://127.0.0.1:8000
-```
-
-Interactive API documentation:
-
+- API: http://127.0.0.1:8000
 - Swagger UI: http://127.0.0.1:8000/docs
 - ReDoc: http://127.0.0.1:8000/redoc
 
+---
+
 ## Authentication & Security
 
-TaskHub implements JWT-based authentication with access tokens and refresh tokens.
+TaskHub uses JWT-based authentication.
 
-### Authentication Features
+### Password Security
 
-- User registration and login.
-- Password hashing using Argon2.
-- JWT access-token generation and validation.
-- Refresh-token generation and storage in Redis.
-- Refresh-token rotation.
-- Refresh-token revocation during logout.
-- Refresh-token reuse detection.
-- Revocation of active refresh-token sessions when token reuse is detected.
-- Password change with current-password verification.
-- Session revocation after successful password change.
-- Protected endpoints using FastAPI dependencies.
-- Custom application exceptions and centralized exception handling.
-- Active-user validation for protected endpoints.
+- Passwords are hashed using Argon2 through pwdlib.
+- Plain-text passwords are never stored in the database.
+- Password verification is performed through the password hashing utility.
 
-### Token Configuration
+### JWT Authentication
 
-| Setting | Default | Description |
-|---|---:|---|
-| `JWT_ALGORITHM` | HS256 | JWT signing algorithm |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | 15 | Access-token lifetime |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | 7 | Refresh-token lifetime |
+The authentication system supports:
 
-The application validates the JWT secret, signing algorithm, and token expiration configuration during startup.
-
-### Authentication Flow
-
-1. A user registers with an email address and password.
-2. The password is hashed using Argon2 before being stored.
-3. The user logs in with valid credentials.
-4. The API returns an access token and a refresh token.
-5. The refresh token is stored and tracked in Redis.
-6. When the access token expires, the client can request a new token pair using the refresh token.
-7. Refresh-token rotation invalidates the previous refresh token.
-8. Reuse of a revoked refresh token triggers revocation of the user's active refresh-token sessions.
-
-## Authorization & Role-Based Access Control (RBAC)
-
-TaskHub implements role-based access control to restrict administrative operations and workspace resources.
-
-### User Roles
-
-The system defines two application-level user roles:
-
-| Role | Description |
-|---|---|
-| `ADMIN` | Has administrative privileges and can access workspace resources with owner-level permissions. |
-| `MEMBER` | Standard authenticated user. |
-
-Administrative user-management endpoints require the `ADMIN` role.
-
-Regular users can access and update their own profiles and change their own passwords.
-
-The system also prevents an administrator from deleting their own account or demoting, deactivating, or removing the last active administrator through the protected user-management operations.
-
-### Workspace Roles
-
-Workspace-level permissions are separate from application-level user roles.
-
-| Role | Read Workspace | Edit Workspace | Manage Members |
-|---|---|---|---|
-| `OWNER` | Yes | Yes | Yes |
-| `EDITOR` | Yes | Yes | No |
-| `VIEWER` | Yes | No | No |
-
-Workspace ownership is determined by the workspace's `owner_id`. The owner does not need a separate membership record.
-
-### Authorization Rules
-
-- Only authenticated users can access protected workspace endpoints.
-- Workspace owners have full control over their workspaces.
-- Workspace editors can access and edit workspace resources but cannot manage members.
-- Workspace viewers have read-only workspace access.
-- Non-members cannot access private workspace resources.
-- Only workspace owners can add or remove members.
-- The workspace owner cannot be added or removed as a regular member.
-- The `OWNER` role cannot be assigned through the member-management endpoint.
-- Application administrators bypass workspace-level role restrictions.
-- Inaccessible or nonexistent workspaces return HTTP 404.
-- Authenticated users without sufficient permissions receive HTTP 403.
-
-Authorization is implemented using reusable FastAPI dependencies, including:
-
-- `get_workspace_role`
-- `require_workspace_member`
-- `require_workspace_editor`
-- `require_workspace_owner`
-- `require_admin`
-
-## API Endpoints
-
-All versioned API endpoints use the `/api/v1` prefix.
-
-### Authentication
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/v1/auth/register` | Register a new account |
-| POST | `/api/v1/auth/login` | Authenticate and obtain tokens |
-| POST | `/api/v1/auth/refresh` | Refresh access and refresh tokens |
-| POST | `/api/v1/auth/logout` | Revoke a refresh token |
-
-### Users
-
-| Method | Endpoint | Permission | Description |
-|---|---|---|---|
-| GET | `/api/v1/users/me` | Authenticated | Get current user's profile |
-| PATCH | `/api/v1/users/me` | Authenticated | Update current user's profile |
-| POST | `/api/v1/users/me/change-password` | Authenticated | Change current user's password |
-| GET | `/api/v1/users/` | ADMIN | Get paginated users |
-| GET | `/api/v1/users/{user_id}` | ADMIN | Get user by ID |
-| POST | `/api/v1/users/` | ADMIN | Create a user |
-| PATCH | `/api/v1/users/{user_id}` | ADMIN | Update a user |
-| DELETE | `/api/v1/users/{user_id}` | ADMIN | Delete a user |
-
-### Workspaces
-
-| Method | Endpoint | Permission | Description |
-|---|---|---|---|
-| POST | `/api/v1/workspaces/` | Authenticated | Create a workspace |
-| GET | `/api/v1/workspaces/` | Authenticated | List workspaces owned or joined by the current user |
-| GET | `/api/v1/workspaces/{workspace_id}` | Workspace member | Get workspace details |
-| PATCH | `/api/v1/workspaces/{workspace_id}` | OWNER | Update workspace |
-| DELETE | `/api/v1/workspaces/{workspace_id}` | OWNER | Delete workspace |
-| POST | `/api/v1/workspaces/{workspace_id}/members` | OWNER | Add a workspace member |
-| GET | `/api/v1/workspaces/{workspace_id}/members` | Workspace member | List workspace members |
-| DELETE | `/api/v1/workspaces/{workspace_id}/members/{user_id}` | OWNER | Remove a workspace member |
-
-### Projects
-
-Project endpoints are available under the versioned API router. See Swagger UI at `/docs` for the current request and response schemas.
-
-### Authorization Header
+- Access tokens.
+- Refresh tokens.
+- Token type validation.
+- Token expiration validation.
+- Refresh token rotation and revocation using Redis.
 
 Protected endpoints require an access token in the HTTP Authorization header:
 
@@ -380,30 +300,167 @@ Protected endpoints require an access token in the HTTP Authorization header:
 Authorization: Bearer <access_token>
 ```
 
-Use the access token returned by the login or refresh endpoint. Refresh tokens are intended for the refresh flow and must not be used as access tokens.
+### Authentication Flow
+
+1. A user registers or logs in.
+2. The API verifies the user's credentials.
+3. The API issues access and refresh tokens.
+4. The client sends the access token when accessing protected endpoints.
+5. The refresh endpoint issues a new token pair when the refresh token is valid.
+6. Logout revokes the refresh token.
+
+---
+
+## Role-Based Access Control (RBAC)
+
+TaskHub implements authorization at both the system and workspace levels.
+
+### System Roles
+
+| Role | Description |
+|---|---|
+| ADMIN | System administrator with administrative privileges |
+| MEMBER | Regular application user |
+
+### Workspace Roles
+
+| Role | Permissions |
+|---|---|
+| OWNER | Full workspace management, including membership management |
+| EDITOR | Can create and update workspace projects |
+| VIEWER | Can view workspace resources |
+
+The workspace owner has OWNER access without requiring a separate membership record.
+
+System administrators can access workspaces with administrative privileges.
+
+### Authorization Dependencies
+
+The application defines the following authorization dependencies in `app/api/dependencies.py`:
+
+| Dependency | Responsibility |
+|---|---|
+| `get_current_user` | Retrieves the authenticated active user |
+| `get_workspace_access` | Retrieves workspace access and the user's workspace role |
+| `require_workspace_member` | Requires workspace membership or equivalent access |
+| `require_workspace_editor` | Requires OWNER or EDITOR access |
+| `require_workspace_owner` | Requires OWNER access |
+| `require_admin` | Requires system ADMIN role |
+
+The `WorkspaceAccess` data class contains the workspace and the user's effective workspace role.
+
+---
+
+## API Endpoints
+
+All API endpoints are prefixed with:
+
+```text
+/api/v1
+```
+
+### Authentication
+
+| Method | Endpoint | Description | Authentication |
+|---|---|---|---|
+| POST | `/auth/register` | Register a new user | Public |
+| POST | `/auth/login` | Authenticate and obtain tokens | Public |
+| POST | `/auth/refresh` | Refresh access and refresh tokens | Refresh token |
+| POST | `/auth/logout` | Revoke refresh token | Authenticated |
+
+### Users
+
+#### Current User
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/users/me` | Get current user's profile |
+| PATCH | `/users/me` | Update current user's profile |
+| POST | `/users/me/change-password` | Change current user's password |
+
+#### User Administration
+
+These endpoints require the system ADMIN role.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/users/` | List users with pagination |
+| GET | `/users/{user_id}` | Get a user by ID |
+| POST | `/users/` | Create a user |
+| PATCH | `/users/{user_id}` | Update a user |
+| DELETE | `/users/{user_id}` | Delete a user |
+
+### Workspaces
+
+| Method | Endpoint | Description | Required Access |
+|---|---|---|---|
+| POST | `/workspaces` | Create a workspace | Authenticated |
+| GET | `/workspaces` | List accessible workspaces with pagination | Authenticated |
+| GET | `/workspaces/{workspace_id}` | Get workspace details | Member |
+| PATCH | `/workspaces/{workspace_id}` | Update workspace | Owner / Editor |
+| DELETE | `/workspaces/{workspace_id}` | Delete workspace | Owner |
+
+#### Workspace Members
+
+| Method | Endpoint | Description | Required Access |
+|---|---|---|---|
+| POST | `/workspaces/{workspace_id}/members` | Add a workspace member | Owner |
+| GET | `/workspaces/{workspace_id}/members` | List workspace members | Member |
+| DELETE | `/workspaces/{workspace_id}/members/{user_id}` | Remove a workspace member | Owner |
+
+### Projects
+
+Project endpoints are nested under a workspace.
+
+Base path:
+
+```text
+/api/v1/workspaces/{workspace_id}/projects
+```
+
+| Method | Endpoint | Description | Required Access |
+|---|---|---|---|
+| POST | `/workspaces/{workspace_id}/projects` | Create a project | Owner / Editor |
+| GET | `/workspaces/{workspace_id}/projects` | List workspace projects | Member |
+| GET | `/workspaces/{workspace_id}/projects/{project_id}` | Get project details | Member |
+| PATCH | `/workspaces/{workspace_id}/projects/{project_id}` | Update a project | Owner / Editor |
+| DELETE | `/workspaces/{workspace_id}/projects/{project_id}` | Delete a project | Owner / Editor |
+
+For request and response schemas, see the Swagger UI at `/docs`.
+
+---
 
 ## Error Handling
 
-The application uses custom exceptions derived from `AppException` and a centralized exception handler.
+The application uses centralized exception handling to return consistent HTTP error responses.
 
-Examples include:
+Common HTTP status codes include:
 
-| Exception | HTTP Status | Description |
-|---|---:|---|
-| `EmailAlreadyRegistered` | 409 | Email address is already registered |
-| `InvalidCredentials` | 401 | Invalid login credentials |
-| `InactiveUser` | 403 | User account is inactive |
-| `InvalidRefreshToken` | 401 | Refresh token is invalid |
-| `PermissionDenied` | 403 | Insufficient permissions |
-| `ResourceNotFound` | 404 | Requested resource does not exist |
-| `ConflictError` | 409 | Resource conflict |
-| `InvalidOperation` | 400 | Operation is not allowed |
+| Status Code | Meaning |
+|---|---|
+| 400 | Bad Request |
+| 401 | Authentication required or invalid credentials/token |
+| 403 | Insufficient permissions |
+| 404 | Requested resource not found |
+| 409 | Resource conflict, such as duplicate email |
+| 422 | Request validation failed |
+| 500 | Internal server error |
 
-Validation errors are handled by FastAPI and Pydantic.
+Examples of application-level errors include:
 
-## Testing & Code Quality
+- Invalid credentials.
+- Inactive user.
+- Invalid refresh token.
+- Permission denied.
+- Resource not found.
+- Duplicate email or other resource conflicts.
+- Invalid business operations.
 
-The project includes automated tests for authentication, authorization, workspace operations, repositories, and project endpoints.
+---
+
+## Testing
+
+The project uses Pytest and HTTPX to test API endpoints, business logic, repositories, authorization, and integrations.
 
 Run the complete test suite:
 
@@ -411,54 +468,119 @@ Run the complete test suite:
 uv run pytest -v
 ```
 
-Run Ruff:
+Run a specific test file:
 
 ```bash
-uv run ruff check .
+uv run pytest tests/test_auth.py -v
 ```
 
-Run MyPy:
+Run authorization tests:
 
 ```bash
-uv run mypy app tests
+uv run pytest tests/test_authorization.py -v
+```
+
+Run workspace tests:
+
+```bash
+uv run pytest tests/test_workspaces.py -v
+```
+
+Run project tests:
+
+```bash
+uv run pytest tests/test_projects.py -v
 ```
 
 ### Test Coverage
 
-The test suite currently verifies:
+The test suite includes:
 
-- User registration and authentication.
-- Access-token and refresh-token behavior.
-- Refresh-token rotation and revocation.
-- Password change and session security.
-- Administrative user-management permissions.
-- Workspace role resolution.
-- Workspace access restrictions.
-- Workspace CRUD operations.
-- Workspace member management.
-- Duplicate membership and invalid-operation handling.
+| Test File | Coverage |
+|---|---|
+| `test_auth.py` | Registration, login, token validation, refresh, logout, and password-related behavior |
+| `test_authorization.py` | Authentication requirements and system/workspace role permissions |
+| `test_admin_concurrency.py` | Concurrent operations that protect the last active administrator |
+| `test_users.py` | User profile, administration, pagination, and user deletion behavior |
+| `test_workspaces.py` | Workspace CRUD, membership, role permissions, pagination, and deletion behavior |
+| `test_projects.py` | Project CRUD and workspace-level authorization |
+| `test_repositories.py` | Repository operations |
+| `test_redis_integration.py` | Redis integration, refresh-token rotation, reuse detection, and revocation |
 
 ### Redis Integration Tests
 
-Redis integration tests verify refresh-token storage, rotation, revocation, and token reuse detection.
+Redis integration tests require a running Redis service.
 
-Make sure Redis is running before executing these tests. The integration tests use Redis database 15.
+The integration tests use Redis database **15** to isolate test data from the application's normal Redis database.
 
-Run Redis integration tests:
+Run the Redis integration tests:
 
 ```bash
 uv run pytest tests/test_redis_integration.py -v
 ```
 
+Make sure the Redis connection settings in the test environment point to the intended test database.
+
+---
+
+## Code Quality
+
+### Ruff
+
+Run lint checks:
+
+```bash
+uv run ruff check .
+```
+
+### MyPy
+
+Run static type checking:
+
+```bash
+uv run mypy app tests
+```
+
+Both tools are used to maintain code quality and catch potential issues before changes are submitted.
+
+---
+
 ## Development Progress
 
-| Day | Focus | Status |
+The project is developed incrementally according to the FastAPI module curriculum.
+
+| Day | Topic | Status |
 |---|---|---|
-| Day 1 | Core setup, project structure, API foundation | Completed |
-| Day 2 | Database integration and repository layer | Completed |
-| Day 3 | Authentication and security | Completed |
-| Day 4 | Authorization and Role-Based Access Control (RBAC) | Implementation completed — final verification pending |
+| Day 1 | Core Setup & Architecture | Completed |
+| Day 2 | SQLAlchemy 2.x Async & Alembic | Completed |
+| Day 3 | Authentication & Security | Completed |
+| Day 4 | Authorization & RBAC | Completed |
+
+### Day 4 Verification
+
+The Day 4 implementation and verification completed with the following results:
+
+| Check | Result |
+|---|---|
+| Full Pytest suite | 83 passed |
+| Ruff | All checks passed |
+| MyPy (`app`) | No issues found |
+| MyPy (`app tests`) | No issues found in 60 source files |
+
+Day 4 includes workspace-level authorization, role-based access control, workspace membership management, project permissions, pagination, and protection against removing the last active administrator.
+
+---
+
+## Notes
+
+- Use `.env.example` as the reference for environment configuration.
+- Never commit `.env`, passwords, access tokens, refresh tokens, or other secrets.
+- Run Alembic migrations after pulling changes that introduce database schema updates.
+- Keep manual verification scripts out of the repository root. Automated tests belong in `tests/`.
+- API request and response details can be inspected through Swagger UI at `/docs`.
+
+---
 
 ## License
 
-This project is developed for learning and educational purposes.
+This project is developed for educational purposes as part of a FastAPI coursework assignment.
