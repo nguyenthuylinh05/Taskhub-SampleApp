@@ -1,9 +1,12 @@
+"""Security utilities for password hashing and JWT tokens."""
+
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 import jwt
 from pwdlib import PasswordHash
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -11,25 +14,29 @@ from app.core.config import (
     JWT_SECRET_KEY,
     REFRESH_TOKEN_EXPIRE_DAYS,
 )
-from app.models.enums import TokenType
+from app.core.constants import TokenType
 
 password_hash = PasswordHash.recommended()
+
+# Used to perform password verification when an account does not exist.
+# This helps reduce timing differences during login.
 DUMMY_PASSWORD_HASH = password_hash.hash(
-    "dummy-password-for-timing-protection"
+    "taskhub-dummy-password-not-used-for-authentication"
 )
 
 
-def hash_password(password: str) -> str:
-    """Hash a plain-text password."""
-    return password_hash.hash(password)
+async def hash_password(password: str) -> str:
+    """Hash a plain-text password without blocking the event loop."""
+    return await run_in_threadpool(password_hash.hash, password)
 
 
-def verify_password(
+async def verify_password(
     plain_password: str,
     hashed_password: str,
 ) -> bool:
-    """Verify a plain-text password against its hash."""
-    return password_hash.verify(
+    """Verify a password without blocking the event loop."""
+    return await run_in_threadpool(
+        password_hash.verify,
         plain_password,
         hashed_password,
     )
@@ -38,9 +45,7 @@ def verify_password(
 def create_access_token(subject: str) -> str:
     """Create a JWT access token."""
     now = datetime.now(UTC)
-    expire = now + timedelta(
-        minutes=ACCESS_TOKEN_EXPIRE_MINUTES,
-    )
+    expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     payload: dict[str, Any] = {
         "sub": subject,
@@ -59,9 +64,7 @@ def create_access_token(subject: str) -> str:
 def create_refresh_token(subject: str) -> str:
     """Create a JWT refresh token."""
     now = datetime.now(UTC)
-    expire = now + timedelta(
-        days=REFRESH_TOKEN_EXPIRE_DAYS,
-    )
+    expire = now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
 
     payload: dict[str, Any] = {
         "sub": subject,
@@ -88,5 +91,21 @@ def decode_token(token: str) -> dict[str, Any]:
             "require": ["sub", "iat", "exp"],
         },
     )
+
+    return payload
+
+
+def decode_refresh_token(token: str) -> dict[str, Any]:
+    """Decode and validate a refresh token."""
+    payload = decode_token(token)
+
+    if payload.get("type") != TokenType.REFRESH:
+        raise jwt.InvalidTokenError("Invalid refresh token")
+
+    if not isinstance(payload.get("jti"), str):
+        raise jwt.InvalidTokenError("Refresh token is missing jti")
+
+    if not isinstance(payload.get("sub"), str):
+        raise jwt.InvalidTokenError("Refresh token is missing subject")
 
     return payload

@@ -1,3 +1,5 @@
+"""Generic asynchronous repository for SQLAlchemy models."""
+
 from typing import Any, cast
 
 from sqlalchemy import func, select
@@ -102,7 +104,9 @@ class BaseRepository[ModelType: Base]:
             await self.session.delete(db_obj)
             await self.session.flush()
         except IntegrityError as exc:
-            raise ConflictError(messages.CANNOT_DELETE_REFERENCED_RESOURCE) from exc
+            raise ConflictError(
+                messages.CANNOT_DELETE_REFERENCED_RESOURCE
+            ) from exc
 
     async def delete(self, obj_id: int) -> bool:
         """Delete a database record by its primary key."""

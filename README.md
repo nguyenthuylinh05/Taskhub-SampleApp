@@ -423,14 +423,7 @@ Run MyPy:
 uv run mypy app tests
 ```
 
-### Latest Verification Results
-
-| Check | Result |
-|---|---|
-| Ruff | Passed |
-| MyPy | Passed — 52 source files |
-| Pytest | 53 passed |
-| Test failures | 0 |
+### Test Coverage
 
 The test suite currently verifies:
 
@@ -445,6 +438,18 @@ The test suite currently verifies:
 - Workspace member management.
 - Duplicate membership and invalid-operation handling.
 
+### Redis Integration Tests
+
+Redis integration tests verify refresh-token storage, rotation, revocation, and token reuse detection.
+
+Make sure Redis is running before executing these tests. The integration tests use Redis database 15.
+
+Run Redis integration tests:
+
+```bash
+uv run pytest tests/test_redis_integration.py -v
+```
+
 ## Development Progress
 
 | Day | Focus | Status |
@@ -452,7 +457,7 @@ The test suite currently verifies:
 | Day 1 | Core setup, project structure, API foundation | Completed |
 | Day 2 | Database integration and repository layer | Completed |
 | Day 3 | Authentication and security | Completed |
-| Day 4 | Authorization and Role-Based Access Control (RBAC) | Completed — 53 tests passed |
+| Day 4 | Authorization and Role-Based Access Control (RBAC) | Implementation completed — final verification pending |
 
 ## License
 

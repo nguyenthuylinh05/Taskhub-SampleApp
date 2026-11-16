@@ -1,7 +1,8 @@
+﻿"""Business logic for user management."""
+
 from typing import Any, NoReturn
 
 from sqlalchemy.exc import IntegrityError
-from starlette.concurrency import run_in_threadpool
 
 from app.core import messages
 from app.core.db_errors import is_email_unique_violation
@@ -101,10 +102,7 @@ class UserService:
         email = str(data.email)
         await self._check_email_available(email)
 
-        hashed_password = await run_in_threadpool(
-            hash_password,
-            data.password,
-        )
+        hashed_password = await hash_password(data.password)
 
         user_data = data.model_dump(exclude={"password"})
         user_data["email"] = email
@@ -116,6 +114,8 @@ class UserService:
             if exc.message == messages.EMAIL_ALREADY_REGISTERED:
                 raise EmailAlreadyRegistered() from None
             raise
+        except IntegrityError as exc:
+            self._handle_email_integrity_error(exc)
 
         return UserResponse.model_validate(user)
 
@@ -189,7 +189,10 @@ class UserService:
         if user_id == requester_id:
             raise CannotDeleteOwnAccount()
 
-        deleted = await self.repository.delete_user(user_id)
+        try:
+            deleted = await self.repository.delete_user(user_id)
+        except IntegrityError as exc:
+            self._handle_email_integrity_error(exc)
 
         if not deleted:
             raise NotFoundException(messages.USER_NOT_FOUND)

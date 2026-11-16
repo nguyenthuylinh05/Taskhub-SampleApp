@@ -6,6 +6,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import TokenType
 from app.core.database import get_db_session
 from app.core.dependencies import WorkspaceRepositoryDep
 from app.core.exceptions import (
@@ -45,7 +46,7 @@ async def get_current_user(
         user_id = payload.get("sub")
         token_type = payload.get("type")
 
-        if not isinstance(user_id, str) or token_type != "access":
+        if not isinstance(user_id, str) or token_type != TokenType.ACCESS:
             raise InvalidCredentials()
 
         user_id_int = int(user_id)

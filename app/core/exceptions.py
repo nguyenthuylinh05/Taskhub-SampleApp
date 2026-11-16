@@ -1,3 +1,5 @@
+﻿"""Custom application exceptions."""
+
 from fastapi import status
 
 from app.core import messages
@@ -14,6 +16,27 @@ class AppException(Exception):
         self.message = message
         self.status_code = status_code
         super().__init__(message)
+
+
+class NotFoundException(AppException):
+    """Raised when a requested resource does not exist."""
+
+    def __init__(self, message: str = "Resource not found") -> None:
+        super().__init__(message, status.HTTP_404_NOT_FOUND)
+
+
+class ConflictError(AppException):
+    """Raised when a resource conflicts with existing data."""
+
+    def __init__(self, message: str = "Resource already exists") -> None:
+        super().__init__(message, status.HTTP_409_CONFLICT)
+
+
+class ValidationException(AppException):
+    """Raised when application-level validation fails."""
+
+    def __init__(self, message: str = "Validation error") -> None:
+        super().__init__(message, status.HTTP_422_UNPROCESSABLE_CONTENT)
 
 
 class EmailAlreadyRegistered(AppException):
@@ -41,7 +64,7 @@ class InactiveUser(AppException):
 
     def __init__(self) -> None:
         super().__init__(
-            message="Inactive user",
+            message=messages.USER_INACTIVE,
             status_code=status.HTTP_403_FORBIDDEN,
         )
 
@@ -57,35 +80,12 @@ class InvalidRefreshToken(AppException):
 
 
 class PermissionDenied(AppException):
-    """Raised when a user does not have permission to perform an action."""
+    """Raised when a user lacks permission to perform an action."""
 
     def __init__(self) -> None:
         super().__init__(
             message="You do not have permission to perform this action",
             status_code=status.HTTP_403_FORBIDDEN,
-        )
-
-
-class NotFoundException(AppException):
-    """Raised when a requested resource does not exist."""
-
-    def __init__(
-        self,
-        message: str = "Resource not found",
-    ) -> None:
-        super().__init__(
-            message=message,
-            status_code=status.HTTP_404_NOT_FOUND,
-        )
-
-
-class ConflictError(AppException):
-    """Raised when a resource conflicts with the current state."""
-
-    def __init__(self, message: str = "Resource already exists") -> None:
-        super().__init__(
-            message=message,
-            status_code=status.HTTP_409_CONFLICT,
         )
 
 
@@ -107,3 +107,13 @@ class CannotDeleteOwnAccount(AppException):
             message=messages.CANNOT_DELETE_OWN_ACCOUNT,
             status_code=status.HTTP_403_FORBIDDEN,
         )
+
+
+class InvalidCurrentPassword(AppException):
+    """Raised when the current password is incorrect."""
+
+    def __init__(
+        self,
+        message: str = "Current password is incorrect",
+    ) -> None:
+        super().__init__(message, status.HTTP_400_BAD_REQUEST)

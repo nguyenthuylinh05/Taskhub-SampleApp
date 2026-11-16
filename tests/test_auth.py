@@ -502,6 +502,37 @@ def test_change_password_rolls_back_when_redis_fails(
     assert new_password_response.status_code == 401
 
 
+
+def test_old_password_cannot_login_after_password_change(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> None:
+    user_data = register_user(client, cleanup_user)
+    access_token = login_user(client, user_data)
+
+    change_response = client.post(
+        "/api/v1/users/me/change-password",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "current_password": "TestPassword123",
+            "new_password": "NewPassword123",
+        },
+    )
+
+    assert change_response.status_code == 204
+
+    old_password_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": user_data["email"],
+            "password": "TestPassword123",
+        },
+    )
+
+    assert old_password_response.status_code == 401
+
+
+
 def test_change_password_wrong_current_password(
     client: TestClient,
     cleanup_user: list[int],

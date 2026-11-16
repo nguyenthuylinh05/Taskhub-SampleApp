@@ -1,3 +1,5 @@
+"""Repository for user operations."""
+
 from typing import Any
 
 from sqlalchemy import func, select, text
@@ -20,6 +22,7 @@ class UserRepository(BaseRepository[User]):
         super().__init__(session, User)
 
     async def get_by_email(self, email: str) -> User | None:
+        """Get a user by email address."""
         statement = select(User).where(User.email == email)
         return await self.session.scalar(statement)
 
@@ -31,6 +34,7 @@ class UserRepository(BaseRepository[User]):
         )
 
     async def count_active_admins(self) -> int:
+        """Count active administrator accounts."""
         statement = (
             select(func.count())
             .select_from(User)
@@ -58,7 +62,9 @@ class UserRepository(BaseRepository[User]):
             await self.session.refresh(user)
         except IntegrityError as exc:
             if is_email_unique_violation(exc):
-                raise ConflictError(messages.EMAIL_ALREADY_REGISTERED) from exc
+                raise ConflictError(
+                    messages.EMAIL_ALREADY_REGISTERED
+                ) from exc
             raise
 
         return user
@@ -87,7 +93,10 @@ class UserRepository(BaseRepository[User]):
         removes_admin_access = (
             user.role == UserRole.ADMIN
             and user.is_active
-            and (data.get("role") == UserRole.MEMBER or data.get("is_active") is False)
+            and (
+                data.get("role") == UserRole.MEMBER
+                or data.get("is_active") is False
+            )
         )
 
         if removes_admin_access and await self.count_active_admins() <= 1:
@@ -126,6 +135,9 @@ class UserRepository(BaseRepository[User]):
             await self.session.delete(user)
             await self.session.flush()
         except IntegrityError as exc:
-            raise ConflictError(messages.CANNOT_DELETE_REFERENCED_RESOURCE) from exc
+            await self.session.rollback()
+            raise ConflictError(
+                messages.CANNOT_DELETE_REFERENCED_RESOURCE
+            ) from exc
 
         return True

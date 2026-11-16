@@ -1,13 +1,17 @@
+﻿"""FastAPI application entry point."""
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.api.v1.router import api_router
-from app.core.config import API_V1_PREFIX, APP_NAME, APP_VERSION
+from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exception_handlers import app_exception_handler
 from app.core.exceptions import AppException
+
+settings = get_settings()
 
 
 @asynccontextmanager
@@ -21,9 +25,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title=f"{APP_NAME} API",
+    title=f"{settings.APP_NAME} API",
     description="Task Management API built with FastAPI",
-    version=APP_VERSION,
+    version=settings.APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -34,7 +38,7 @@ app.add_exception_handler(
 
 app.include_router(
     api_router,
-    prefix=API_V1_PREFIX,
+    prefix=settings.API_V1_PREFIX,
 )
 
 
@@ -43,7 +47,9 @@ app.include_router(
     tags=["Health"],
 )
 async def health_check() -> dict[str, str]:
+    """Return application health status."""
+
     return {
         "status": "healthy",
-        "application": APP_NAME,
+        "application": settings.APP_NAME,
     }
