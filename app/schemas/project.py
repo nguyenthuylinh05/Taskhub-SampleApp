@@ -1,7 +1,8 @@
-from datetime import datetime
-from uuid import UUID
+"""Project request and response schemas."""
 
-from pydantic import ConfigDict, Field, field_validator
+from datetime import datetime
+
+from pydantic import Field, field_validator
 
 from app.core.constants import (
     PROJECT_DESCRIPTION_MAX_LENGTH,
@@ -42,6 +43,7 @@ class ProjectUpdate(BaseSchema):
     @field_validator("name", mode="before")
     @classmethod
     def reject_null_name(cls, value: object) -> object:
+        """Reject explicitly null project names."""
         if value is None:
             raise ValueError("Project name cannot be null.")
         return value
@@ -50,9 +52,8 @@ class ProjectUpdate(BaseSchema):
 class ProjectResponse(BaseSchema):
     """Schema for returning project information."""
 
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
+    id: int
+    workspace_id: int
     name: str
     description: str | None
     created_at: datetime

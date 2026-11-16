@@ -5,10 +5,12 @@ from uuid import uuid4
 
 import pytest
 from app.core.exceptions import (
+    AppException,
     ConflictError,
+    EmailAlreadyRegistered,
     NotFoundException,
-    ValidationException,
 )
+from app.core.security import verify_password
 from app.models import Workspace
 from app.repositories.user import UserRepository
 from app.schemas.user import UserCreate, UserUpdate
@@ -37,7 +39,7 @@ def user_service(db_session: AsyncSession) -> UserService:
 
 @pytest.mark.asyncio
 async def test_create_user_success(user_service: UserService) -> None:
-    """A user can be created successfully."""
+    """A user can be created with a securely hashed password."""
     data = make_user_data()
 
     user = await user_service.create_user(data)
@@ -45,19 +47,25 @@ async def test_create_user_success(user_service: UserService) -> None:
     assert user.id is not None
     assert user.email == str(data.email)
     assert user.full_name == data.full_name
-    assert user.hashed_password != data.password
+    assert not hasattr(user, "hashed_password")
+
+    stored_user = await user_service.repository.get_by_email(str(data.email))
+
+    assert stored_user is not None
+    assert stored_user.hashed_password != data.password
+    assert await verify_password(data.password, stored_user.hashed_password)
 
 
 @pytest.mark.asyncio
 async def test_create_user_duplicate_email(
     user_service: UserService,
 ) -> None:
-    """Creating a user with an existing email raises ConflictError."""
+    """Creating a user with an existing email raises EmailAlreadyRegistered."""
     data = make_user_data()
 
     await user_service.create_user(data)
 
-    with pytest.raises(ConflictError):
+    with pytest.raises(EmailAlreadyRegistered):
         await user_service.create_user(data)
 
 
@@ -66,22 +74,27 @@ async def test_create_user_integrity_error(
     user_service: UserService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A database uniqueness race is converted into ConflictError."""
+    """A database email uniqueness race raises EmailAlreadyRegistered."""
+
+    class DuplicateEmailError(Exception):
+        sqlstate = "23505"
+        constraint_name = "ix_users_email"
+
     data = make_user_data()
 
     monkeypatch.setattr(
         user_service.repository,
-        "create",
+        "create_user",
         AsyncMock(
             side_effect=IntegrityError(
                 "INSERT INTO users",
                 {},
-                Exception("duplicate key"),
+                DuplicateEmailError("duplicate key"),
             )
         ),
     )
 
-    with pytest.raises(ConflictError):
+    with pytest.raises(EmailAlreadyRegistered):
         await user_service.create_user(data)
 
 
@@ -105,14 +118,16 @@ async def test_get_user_not_found(user_service: UserService) -> None:
 
 @pytest.mark.asyncio
 async def test_get_users_pagination(user_service: UserService) -> None:
-    """User listing returns records and the total count."""
+    """User listing returns paginated records and the total count."""
     await user_service.create_user(make_user_data())
     await user_service.create_user(make_user_data())
 
-    users, total = await user_service.get_users(page=1, limit=10)
+    result = await user_service.get_users(page=1, limit=10)
 
-    assert len(users) >= 2
-    assert total >= 2
+    assert len(result.items) >= 2
+    assert result.total >= 2
+    assert result.page == 1
+    assert result.limit == 10
 
 
 @pytest.mark.asyncio
@@ -134,11 +149,11 @@ async def test_update_user_success(user_service: UserService) -> None:
 async def test_update_user_duplicate_email(
     user_service: UserService,
 ) -> None:
-    """Updating to another user's email raises ConflictError."""
+    """Updating to another user's email raises EmailAlreadyRegistered."""
     first_user = await user_service.create_user(make_user_data())
     second_user = await user_service.create_user(make_user_data())
 
-    with pytest.raises(ConflictError):
+    with pytest.raises(EmailAlreadyRegistered):
         await user_service.update_user(
             first_user.id,
             UserUpdate(email=second_user.email),
@@ -152,11 +167,13 @@ async def test_update_user_null_field(
     """Explicitly setting an update field to None is rejected."""
     user = await user_service.create_user(make_user_data())
 
-    with pytest.raises(ValidationException):
+    with pytest.raises(AppException) as exc_info:
         await user_service.update_user(
             user.id,
             UserUpdate(full_name=None),
         )
+
+    assert exc_info.value.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -173,8 +190,12 @@ async def test_update_user_not_found(user_service: UserService) -> None:
 async def test_delete_user_success(user_service: UserService) -> None:
     """A user without restricted references can be deleted."""
     user = await user_service.create_user(make_user_data())
+    requester = await user_service.create_user(make_user_data())
 
-    await user_service.delete_user(user.id)
+    await user_service.delete_user(
+        user.id,
+        requester_id=requester.id,
+    )
 
     with pytest.raises(NotFoundException):
         await user_service.get_user(user.id)
@@ -187,18 +208,20 @@ async def test_delete_user_with_owned_workspace(
 ) -> None:
     """Deleting a workspace owner raises ConflictError."""
     user = await user_service.create_user(make_user_data())
-    user_id = user.id  # Save ID before the transaction can be rolled back.
+    requester = await user_service.create_user(make_user_data())
 
     workspace = Workspace(
         name="Test Workspace",
-        owner_id=user_id,
+        owner_id=user.id,
     )
     db_session.add(workspace)
     await db_session.commit()
 
     with pytest.raises(ConflictError):
-        await user_service.delete_user(user_id)
+        await user_service.delete_user(
+            user.id,
+            requester_id=requester.id,
+        )
 
-    # The failed deletion must not remove the user.
-    existing_user = await user_service.get_user(user_id)
-    assert existing_user.id == user_id
+    existing_user = await user_service.get_user(user.id)
+    assert existing_user.id == user.id

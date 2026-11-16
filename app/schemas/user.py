@@ -2,9 +2,10 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import EmailStr, Field, field_validator
 
 from app.core.constants import (
+    USER_EMAIL_MAX_LENGTH,
     USER_FULL_NAME_MAX_LENGTH,
     USER_FULL_NAME_MIN_LENGTH,
     USER_PASSWORD_MAX_LENGTH,
@@ -14,10 +15,10 @@ from app.models.enums import UserRole
 from app.schemas.base import BaseSchema
 
 
-class UserCreate(BaseModel):
+class UserCreate(BaseSchema):
     """Schema for creating a user."""
 
-    email: EmailStr
+    email: EmailStr = Field(max_length=USER_EMAIL_MAX_LENGTH)
     full_name: str = Field(
         min_length=USER_FULL_NAME_MIN_LENGTH,
         max_length=USER_FULL_NAME_MAX_LENGTH,
@@ -28,21 +29,15 @@ class UserCreate(BaseModel):
     )
     role: UserRole = UserRole.MEMBER
 
-    @field_validator("email", "full_name", mode="before")
+    @field_validator("password", mode="before")
     @classmethod
-    def strip_user_text_fields(cls, value: object) -> object:
-        """Strip whitespace from email and full name without changing passwords."""
-        if isinstance(value, str):
-            value = value.strip()
-            if not value:
-                raise ValueError("String must not be empty or whitespace only.")
+    def preserve_password(cls, value: object) -> object:
+        """Preserve password whitespace instead of stripping it."""
         return value
 
 
 class UserResponse(BaseSchema):
     """Schema for returning user information."""
-
-    model_config = ConfigDict(from_attributes=True)
 
     id: int
     email: EmailStr
@@ -52,10 +47,22 @@ class UserResponse(BaseSchema):
     created_at: datetime
 
 
+class UserListResponse(BaseSchema):
+    """Paginated user list response."""
+
+    items: list[UserResponse]
+    total: int
+    page: int
+    limit: int
+
+
 class UserUpdate(BaseSchema):
     """Schema for updating user information."""
 
-    email: EmailStr | None = None
+    email: EmailStr | None = Field(
+        default=None,
+        max_length=USER_EMAIL_MAX_LENGTH,
+    )
     full_name: str | None = Field(
         default=None,
         min_length=USER_FULL_NAME_MIN_LENGTH,
@@ -68,7 +75,10 @@ class UserUpdate(BaseSchema):
 class UserProfileUpdate(BaseSchema):
     """Schema for updating the current user's profile."""
 
-    email: EmailStr | None = None
+    email: EmailStr | None = Field(
+        default=None,
+        max_length=USER_EMAIL_MAX_LENGTH,
+    )
     full_name: str | None = Field(
         default=None,
         min_length=USER_FULL_NAME_MIN_LENGTH,
@@ -76,7 +86,7 @@ class UserProfileUpdate(BaseSchema):
     )
 
 
-class ChangePasswordRequest(BaseModel):
+class ChangePasswordRequest(BaseSchema):
     """Schema for changing the current user's password."""
 
     current_password: str = Field(
@@ -88,11 +98,8 @@ class ChangePasswordRequest(BaseModel):
         max_length=USER_PASSWORD_MAX_LENGTH,
     )
 
-
-class UserListResponse(BaseSchema):
-    """Paginated user list response."""
-
-    items: list[UserResponse]
-    total: int
-    page: int
-    limit: int
+    @field_validator("current_password", "new_password", mode="before")
+    @classmethod
+    def preserve_passwords(cls, value: object) -> object:
+        """Preserve password whitespace instead of stripping it."""
+        return value

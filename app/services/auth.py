@@ -1,5 +1,7 @@
 """Authentication business logic."""
 
+from typing import Any
+
 import jwt
 from sqlalchemy.exc import IntegrityError
 
@@ -42,6 +44,14 @@ class AuthService:
 
     def __init__(self, user_repository: UserRepository) -> None:
         self.user_repository = user_repository
+
+    @staticmethod
+    def _decode_refresh_token(token: str) -> dict[str, Any]:
+        """Decode a refresh token and translate JWT errors."""
+        try:
+            return decode_refresh_token(token)
+        except jwt.InvalidTokenError:
+            raise InvalidRefreshToken() from None
 
     async def register(self, data: RegisterRequest) -> User:
         """Register a new user."""
@@ -90,7 +100,6 @@ class AuthService:
                 "New password must be different from current password"
             )
 
-        # Revoke existing sessions before changing the password.
         await revoke_all_refresh_tokens(str(user.id))
 
         new_hashed_password = await hash_password(data.new_password)
@@ -129,11 +138,8 @@ class AuthService:
         access_token = create_access_token(str(user.id))
         refresh_token = create_refresh_token(str(user.id))
 
-        refresh_payload = decode_refresh_token(refresh_token)
-        jti = refresh_payload.get("jti")
-
-        if not isinstance(jti, str):
-            raise InvalidRefreshToken()
+        refresh_payload = self._decode_refresh_token(refresh_token)
+        jti = refresh_payload["jti"]
 
         await store_refresh_token(
             jti=jti,
@@ -149,17 +155,14 @@ class AuthService:
     async def refresh(self, data: RefreshRequest) -> TokenResponse:
         """Rotate refresh token and issue new access token."""
 
-        try:
-            payload = decode_refresh_token(data.refresh_token)
-        except jwt.InvalidTokenError:
-            raise InvalidRefreshToken() from None
+        payload = self._decode_refresh_token(data.refresh_token)
 
         user_id = payload["sub"]
         old_jti = payload["jti"]
 
         try:
             user_id_int = int(user_id)
-        except ValueError:
+        except (ValueError, TypeError):
             raise InvalidRefreshToken() from None
 
         user = await self.user_repository.get_by_id(user_id_int)
@@ -171,11 +174,8 @@ class AuthService:
             raise InactiveUser()
 
         new_refresh_token = create_refresh_token(str(user.id))
-        new_payload = decode_refresh_token(new_refresh_token)
-        new_jti = new_payload.get("jti")
-
-        if not isinstance(new_jti, str):
-            raise InvalidRefreshToken()
+        new_payload = self._decode_refresh_token(new_refresh_token)
+        new_jti = new_payload["jti"]
 
         rotated = await rotate_refresh_token(
             old_jti=old_jti,
@@ -195,17 +195,14 @@ class AuthService:
     async def logout(self, data: RefreshRequest) -> None:
         """Revoke a refresh token."""
 
-        try:
-            payload = decode_refresh_token(data.refresh_token)
-        except jwt.InvalidTokenError:
-            raise InvalidRefreshToken() from None
+        payload = self._decode_refresh_token(data.refresh_token)
 
         user_id = payload["sub"]
         jti = payload["jti"]
 
         try:
             int(user_id)
-        except ValueError:
+        except (ValueError, TypeError):
             raise InvalidRefreshToken() from None
 
         revoked = await revoke_refresh_token(

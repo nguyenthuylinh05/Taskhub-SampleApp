@@ -1,9 +1,10 @@
-"""Shared fixtures for database and API tests."""
+﻿"""Shared fixtures for database and API tests."""
 
 import os
 from collections.abc import AsyncGenerator, Generator
 from unittest.mock import AsyncMock
 
+import anyio
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
@@ -12,7 +13,7 @@ from alembic.config import Config
 from app.core.config import settings
 from app.core.database import get_db_session
 from app.main import app
-from app.models import User
+from app.models import User, Workspace
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import (
@@ -165,7 +166,12 @@ def client(
 
     async def override_get_db_session() -> AsyncGenerator[AsyncSession, None]:
         async with test_session_factory() as session:
-            yield session
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
     app.dependency_overrides[get_db_session] = override_get_db_session
 
@@ -174,9 +180,6 @@ def client(
             yield test_client
     finally:
         app.dependency_overrides.clear()
-
-        import anyio
-
         anyio.run(test_engine.dispose)
 
 
@@ -209,6 +212,40 @@ def cleanup_user() -> Generator[list[int], None, None]:
         finally:
             await engine.dispose()
 
-    import anyio
-
     anyio.run(delete_test_users)
+
+
+@pytest.fixture
+def cleanup_workspace(
+    cleanup_user: list[int],
+) -> Generator[list[int], None, None]:
+    """Track workspace IDs and remove them before cleaning up users."""
+
+    workspace_ids: list[int] = []
+    yield workspace_ids
+
+    if not workspace_ids:
+        return
+
+    async def delete_test_workspaces() -> None:
+        engine = create_async_engine(
+            settings.TEST_DATABASE_URL,
+            pool_pre_ping=True,
+        )
+        session_factory = async_sessionmaker(
+            engine,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with session_factory() as session:
+                await session.execute(
+                    delete(Workspace).where(
+                        Workspace.id.in_(workspace_ids),
+                    ),
+                )
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    anyio.run(delete_test_workspaces)
