@@ -1,3 +1,5 @@
+"""Application dependency providers."""
+
 from typing import Annotated, cast
 
 from fastapi import Depends, Request
@@ -10,8 +12,14 @@ from app.repositories.project import InMemoryProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
+from app.services.auth import AuthService
 from app.services.project import ProjectService
 from app.services.user import UserService
+
+DatabaseSessionDep = Annotated[
+    AsyncSession,
+    Depends(get_db_session),
+]
 
 
 def get_project_repository(
@@ -45,12 +53,6 @@ ProjectServiceDep = Annotated[
 ]
 
 
-DatabaseSessionDep = Annotated[
-    AsyncSession,
-    Depends(get_db_session),
-]
-
-
 def get_user_repository(
     session: DatabaseSessionDep,
 ) -> UserRepository:
@@ -65,10 +67,24 @@ UserRepositoryDep = Annotated[
 ]
 
 
+def get_auth_service(
+    repository: UserRepositoryDep,
+) -> AuthService:
+    """Provide an authentication service."""
+
+    return AuthService(repository)
+
+
+AuthServiceDep = Annotated[
+    AuthService,
+    Depends(get_auth_service),
+]
+
+
 def get_user_service(
     repository: UserRepositoryDep,
 ) -> UserService:
-    """Create user service with injected repository."""
+    """Provide a user service."""
 
     return UserService(repository)
 

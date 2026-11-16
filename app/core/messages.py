@@ -15,3 +15,4 @@ CANNOT_DELETE_REFERENCED_RESOURCE = (
 USER_NOT_FOUND = "User not found"
 USER_EMAIL_ALREADY_REGISTERED = "Email already registered"
 USER_UPDATE_FIELDS_CANNOT_BE_NULL = "Update fields cannot be null"
+USER_INACTIVE = "Inactive user"
