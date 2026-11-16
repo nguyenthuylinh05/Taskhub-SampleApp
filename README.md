@@ -1,83 +1,56 @@
-
 # TaskHub - Task Management API
 
-TaskHub is a task management backend API built with **FastAPI**. This learning project demonstrates layered architecture, asynchronous database operations, repository and service patterns, database migrations, dependency injection, JWT authentication, refresh-token session management, and automated testing.
+A RESTful Task Management API built with **FastAPI**, **SQLAlchemy 2.x (Async)**, **PostgreSQL**, and **Redis**. The project follows a layered architecture to keep the codebase maintainable, testable, and scalable.
 
 ## Tech Stack
 
 | Category | Technology |
 |---|---|
 | Language | Python 3.12+ |
-| API Framework | FastAPI 0.111+ |
-| Data Validation | Pydantic v2 |
-| Configuration | Pydantic Settings |
+| Web Framework | FastAPI 0.111+ |
+| ASGI Server | Uvicorn |
 | ORM | SQLAlchemy 2.x (Async) |
 | Database | PostgreSQL 16 |
-| Database Driver | asyncpg |
-| Migrations | Alembic |
-| Password Hashing | pwdlib with Argon2 |
-| Authentication | JWT with PyJWT |
-| Refresh-token Storage | Redis 7 |
-| Containerization | Docker Compose |
-| Testing | Pytest, pytest-asyncio, HTTPX2 |
-| Code Quality | Ruff, MyPy |
-| Package Management | uv |
+| Database Migrations | Alembic |
+| Data Validation | Pydantic v2 |
+| Cache / Token Storage | Redis 7 |
+| Authentication | JWT (PyJWT), Argon2 |
+| Package Manager | uv |
+| Testing | Pytest, pytest-asyncio, HTTPX |
+| Code Quality | Ruff, Mypy |
+| Containerization | Docker, Docker Compose |
 
-## Project Architecture
+## Architecture
 
-The application follows a layered architecture to separate responsibilities and improve maintainability, testability, and extensibility.
+The application follows a layered architecture:
 
-- **API Layer:** Handles HTTP requests, responses, and API routing.
-- **Schema Layer:** Defines request and response data structures using Pydantic.
-- **Service Layer:** Contains application business logic and coordinates repository operations.
-- **Repository Layer:** Encapsulates database access and CRUD operations.
-- **Model Layer:** Defines database entities and relationships using SQLAlchemy.
+```text
+┌──────────────────────────────────────────────┐
+│                  API Layer                   │
+│       FastAPI Routers and Endpoints           │
+├──────────────────────────────────────────────┤
+│                Service Layer                 │
+│       Business Logic and Validation          │
+├──────────────────────────────────────────────┤
+│              Repository Layer                │
+│        Database Access and CRUD               │
+├──────────────────────────────────────────────┤
+│                  Core Layer                  │
+│ Configuration, Security, Database, Redis,    │
+│ Dependencies, Exceptions, and Constants      │
+├──────────────────────────────────────────────┤
+│                Data Layer                    │
+│           PostgreSQL and Redis               │
+└──────────────────────────────────────────────┘
+```
+
+### Layer Responsibilities
+
+- **API Layer:** Defines HTTP endpoints, handles requests, and returns responses.
+- **Service Layer:** Contains business logic and coordinates repositories.
+- **Repository Layer:** Encapsulates database operations using SQLAlchemy 2.x async queries.
 - **Core Layer:** Contains application configuration, database connections, dependencies, security utilities, Redis integration, constants, messages, and exception handling.
-
-### Database Architecture
-
-The project uses SQLAlchemy 2.x asynchronous ORM with PostgreSQL.
-
-The database models include:
-
-- User
-- Workspace
-- WorkspaceMember
-- Project
-- Task
-- Label
-- TaskLabel
-- Comment
-
-Primary keys use integer auto-incrementing identifiers.
-
-### Repository Pattern
-
-The repository layer provides reusable database operations through a generic base repository. Entity-specific repositories extend the base repository to implement additional data-access operations. Database operations use SQLAlchemy asynchronous sessions.
-
-### Service Layer
-
-The service layer separates business logic from HTTP endpoints and database access.
-
-- `UserService` coordinates user-related operations.
-- `AuthService` handles authentication workflows.
-- `ProjectService` handles project-related operations.
-
-### Database Migrations
-
-Alembic manages database schema changes. Migration files are stored in `alembic/versions/`.
-
-Apply migrations:
-
-```powershell
-uv run alembic upgrade head
-```
-
-Check the current migration revision:
-
-```powershell
-uv run alembic current
-```
+- **Data Layer:** Uses PostgreSQL for persistent application data and Redis for refresh-token storage.
 
 ## Project Structure
 
@@ -89,17 +62,17 @@ Taskhub-SampleApp/
 │   │   ├── 8367cebbb3b8_add_foreign_key_indexes_and_delete_rules.py
 │   │   └── 6f44128e9f83_add_unique_email_constraint_to_users.py
 │   ├── env.py
-│   ├── README
 │   └── script.py.mako
+│
 ├── app/
 │   ├── api/
-│   │   ├── dependencies.py
 │   │   └── v1/
 │   │       ├── endpoints/
 │   │       │   ├── auth.py
 │   │       │   ├── projects.py
 │   │       │   └── users.py
 │   │       └── router.py
+│   │
 │   ├── core/
 │   │   ├── config.py
 │   │   ├── constants.py
@@ -110,89 +83,63 @@ Taskhub-SampleApp/
 │   │   ├── messages.py
 │   │   ├── redis.py
 │   │   └── security.py
+│   │
 │   ├── models/
-│   │   ├── base.py
-│   │   ├── comment.py
-│   │   ├── enums.py
-│   │   ├── label.py
-│   │   ├── project.py
-│   │   ├── task.py
-│   │   ├── user.py
-│   │   └── workspace.py
 │   ├── repositories/
-│   │   ├── base.py
-│   │   ├── comment.py
-│   │   ├── label.py
-│   │   ├── project.py
-│   │   ├── task.py
-│   │   ├── user.py
-│   │   └── workspace.py
 │   ├── schemas/
-│   │   ├── auth.py
-│   │   ├── base.py
-│   │   ├── project.py
-│   │   └── user.py
 │   ├── services/
-│   │   ├── auth.py
-│   │   ├── project.py
-│   │   └── user.py
 │   └── main.py
+│
 ├── tests/
 │   ├── conftest.py
 │   ├── test_auth.py
 │   ├── test_projects.py
+│   ├── test_redis_integration.py
 │   ├── test_repositories.py
 │   └── test_users.py
+│
 ├── .env.example
 ├── .gitignore
 ├── alembic.ini
-├── compose.yaml
+├── docker-compose.yml
 ├── pyproject.toml
-├── uv.lock
-└── README.md
+├── README.md
+└── uv.lock
 ```
-
-The structure above reflects the Day 2 database layer and Day 3 authentication layer.
 
 ## Getting Started
 
-### 1. Prerequisites
+### Prerequisites
 
-Install the following tools:
+Make sure the following tools are installed:
 
-- Python 3.12 or newer
+- Python 3.12+
 - uv
 - Docker Desktop
 - Git
 
-### 2. Clone the Repository
+### 1. Clone the Repository
 
 ```powershell
 git clone https://github.com/nguyenthuylinh05/Taskhub-SampleApp.git
 cd Taskhub-SampleApp
 ```
 
-Switch to the branch you want to work with, if needed:
+### 2. Install Dependencies
 
 ```powershell
-git switch day-3-auth-security
+uv sync
 ```
 
-### 3. Install Dependencies
+### 3. Configure Environment Variables
 
-Install project dependencies, including development dependencies:
-
-```powershell
-uv sync --all-extras
-```
-
-### 4. Configure Environment Variables
-
-Create a local `.env` file from the example:
+Copy the example environment file:
 
 ```powershell
 Copy-Item .env.example .env
 ```
+
+Update `.env` with your local configuration.
 
 Generate a secure JWT secret:
 
@@ -200,247 +147,242 @@ Generate a secure JWT secret:
 uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Set the generated value as `JWT_SECRET_KEY` in `.env`. Update the PostgreSQL password and other local settings as necessary.
+Replace the development JWT secret in `.env` with the generated value.
 
-Example configuration:
+**Important:** Never use the development secret in production or commit your actual `.env` file.
 
-```dotenv
-# Application
-APP_NAME=TaskHub
-APP_VERSION=0.1.0
-ENVIRONMENT=development
-DEBUG=true
-API_V1_PREFIX=/api/v1
+### 4. Start PostgreSQL and Redis
 
-# PostgreSQL
-POSTGRES_DB=taskhub_db
-POSTGRES_USER=taskhub_user
-POSTGRES_PASSWORD=your_local_password
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_TEST_DB=taskhub_test_db
-
-# JWT
-JWT_SECRET_KEY=replace_with_your_generated_secret
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=15
-REFRESH_TOKEN_EXPIRE_DAYS=7
-
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-```
-
-The test database URL is derived from the PostgreSQL settings and `POSTGRES_TEST_DB`.
-
-**Never commit your local `.env` file or real credentials.**
-
-### 5. Start PostgreSQL and Redis
-
-The Docker Compose configuration provides PostgreSQL 16 and Redis 7.
-
-Start both services:
+Start the services using Docker Compose:
 
 ```powershell
 docker compose up -d
 ```
 
-Check their status:
+Check the running containers:
 
 ```powershell
 docker compose ps
 ```
 
-The services are exposed on localhost using the configured PostgreSQL port and Redis port `6379`.
+### 5. Run Database Migrations
 
-### 6. Apply Database Migrations
+Apply all database migrations:
 
 ```powershell
 uv run alembic upgrade head
 ```
 
-Check the current revision:
-
-```powershell
-uv run alembic current
-```
-
-### 7. Run the Application
+### 6. Start the Application
 
 ```powershell
 uv run uvicorn app.main:app --reload
 ```
 
-The application will be available at:
+The API will be available at:
 
 - API: http://127.0.0.1:8000
 - Swagger UI: http://127.0.0.1:8000/docs
 - ReDoc: http://127.0.0.1:8000/redoc
 
-## Authentication & Security
+## Authentication and Security
 
-TaskHub implements JWT-based authentication with access tokens and refresh tokens.
+The application implements JWT-based authentication with access tokens and refresh tokens.
 
-### Authentication Features
+### Features
 
 - User registration and login.
 - Password hashing using Argon2.
-- JWT access-token generation and validation.
-- Refresh-token generation and storage in Redis.
+- JWT access-token authentication.
+- Refresh-token storage using Redis.
 - Refresh-token rotation.
-- Refresh-token revocation during logout.
 - Refresh-token reuse detection.
-- Revocation of active refresh-token sessions when token reuse is detected.
+- Individual session revocation.
+- Revocation of all user refresh-token sessions.
 - Password change with current-password verification.
-- Session revocation after successful password change.
-- Protected endpoints using FastAPI dependencies.
-- Custom application exceptions and centralized exception handling.
+- Protected user profile endpoints.
 
-### Token Configuration
+### Token Management
 
-| Setting | Default | Description |
-|---|---:|---|
-| `JWT_ALGORITHM` | `HS256` | JWT signing algorithm |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Access-token lifetime in minutes |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh-token lifetime in days |
-
-### Authentication Flow
-
-1. A user registers with an email address and password.
-2. The password is hashed using Argon2 before being stored.
-3. The user logs in with valid credentials.
-4. The API returns an access token and a refresh token.
-5. The refresh token is stored and tracked in Redis.
-6. When the access token expires, the client can request a new token pair using the refresh token.
-7. Refresh-token rotation invalidates the previous refresh token.
-8. Reuse of a revoked refresh token triggers revocation of the user's active refresh-token sessions.
+- Access tokens are used to authenticate API requests.
+- Refresh tokens are stored and managed in Redis.
+- Refresh-token rotation replaces the previous token with a new one.
+- Reuse detection helps identify attempts to reuse an already rotated token.
+- Logout revokes the corresponding refresh-token session.
 
 ## API Endpoints
 
-All versioned API endpoints use the `/api/v1` prefix.
+All API endpoints use the `/api/v1` prefix.
 
 ### Authentication
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/v1/auth/register` | Register a new account |
-| POST | `/api/v1/auth/login` | Authenticate and obtain tokens |
-| POST | `/api/v1/auth/refresh` | Refresh access and refresh tokens |
-| POST | `/api/v1/auth/logout` | Revoke a refresh token |
+| POST | `/auth/register` | Register a new user |
+| POST | `/auth/login` | Authenticate a user |
+| POST | `/auth/refresh` | Refresh access and refresh tokens |
+| POST | `/auth/logout` | Revoke the current refresh-token session |
 
 ### Users
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/v1/users/me` | Get the current authenticated user's profile |
-| PATCH | `/api/v1/users/me` | Update the current authenticated user's profile |
-| POST | `/api/v1/users/me/change-password` | Change the current user's password |
-| GET | `/api/v1/users/` | Get paginated users |
-| GET | `/api/v1/users/{user_id}` | Get a user by ID |
-| POST | `/api/v1/users/` | Create a user |
-| PATCH | `/api/v1/users/{user_id}` | Update a user |
-| DELETE | `/api/v1/users/{user_id}` | Delete a user |
-
-Protected endpoints require an access token in the HTTP Authorization header:
-
-```http
-Authorization: Bearer <access_token>
-```
+| GET | `/users/me` | Get the current user's profile |
+| PATCH | `/users/me` | Update the current user's profile |
 
 ### Projects
 
-Project endpoints are available under the versioned API router. Refer to Swagger UI at `/docs` for the currently implemented request and response schemas.
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/projects` | List projects |
+| POST | `/projects` | Create a project |
+| GET | `/projects/{project_id}` | Get project details |
+| PATCH | `/projects/{project_id}` | Update a project |
+| DELETE | `/projects/{project_id}` | Delete a project |
 
-## Error Handling
+For detailed request and response schemas, use the Swagger UI at `/docs`.
 
-The application uses custom exceptions derived from `AppException` and a centralized exception handler.
+## Database
 
-Authentication-related exceptions include:
+The project uses PostgreSQL 16 with SQLAlchemy 2.x asynchronous database operations.
 
-- `EmailAlreadyRegistered`: HTTP 409
-- `InvalidCredentials`: HTTP 401
-- `InactiveUser`: HTTP 403
-- `InvalidRefreshToken`: HTTP 401
+### Database Migrations
 
-Validation errors are handled by FastAPI and Pydantic.
+Create a new migration:
+
+```powershell
+uv run alembic revision --autogenerate -m "migration_description"
+```
+
+Apply migrations:
+
+```powershell
+uv run alembic upgrade head
+```
+
+Rollback the latest migration:
+
+```powershell
+uv run alembic downgrade -1
+```
+
+Check the current migration revision:
+
+```powershell
+uv run alembic current
+```
+
+## Redis
+
+Redis 7 is used for refresh-token storage and session management.
+
+The application uses Redis to support:
+
+- Refresh-token storage.
+- Refresh-token rotation.
+- Refresh-token reuse detection.
+- Individual session revocation.
+- Revocation of all refresh-token sessions belonging to a user.
+
+Redis caching for application data is planned as a future enhancement.
 
 ## Testing
 
-Tests are located in the `tests/` directory. The test configuration uses a dedicated PostgreSQL test database, applies database migrations, and uses transaction rollback to isolate test data.
+The project uses Pytest, pytest-asyncio, and HTTPX for automated testing.
 
-Run the complete test suite:
+### Run All Tests
 
 ```powershell
 uv run pytest -v
 ```
 
-Run a specific test module:
+### Run a Specific Test File
 
 ```powershell
-uv run pytest tests/test_users.py -v
+uv run pytest tests/test_auth.py -v
 ```
+
+### Redis Integration Tests
+
+Redis integration tests use a dedicated Redis test database (DB 15) to verify refresh-token operations against a real Redis instance.
+
+The tests cover:
+
+- Refresh-token rotation.
+- Refresh-token reuse detection.
+- Refresh-token revocation.
+- Revocation of all refresh-token sessions.
+
+Run Redis integration tests:
+
+```powershell
+uv run pytest tests/test_redis_integration.py -v
+```
+
+Make sure PostgreSQL and Redis are running before executing integration tests.
+
+The integration tests use isolated test data and should not require flushing the entire Redis database.
 
 ## Code Quality
 
 ### Ruff
 
-Check code style and linting:
+Check code quality:
 
 ```powershell
 uv run ruff check .
 ```
 
-Format Python files:
+Automatically fix supported issues:
 
 ```powershell
-uv run ruff format .
+uv run ruff check . --fix
 ```
 
-Check formatting without modifying files:
-
-```powershell
-uv run ruff format --check .
-```
-
-### MyPy
+### Mypy
 
 Run static type checking:
 
 ```powershell
-uv run mypy app
+uv run mypy app/
 ```
 
 ## Development Progress
 
-| Day | Focus | Status |
+| Day | Topic | Status |
 |---|---|---|
-| Day 1 | Core setup, project structure, API foundation | Completed |
-| Day 2 | Database integration and repository layer | Completed |
-| Day 3 | Authentication and security | In Progress |
-| Day 4 | Authorization and Role-Based Access Control (RBAC) | Planned |
+| Day 1 | Core setup and architecture | Completed |
+| Day 2 | SQLAlchemy async and Alembic | Completed |
+| Day 3 | Authentication and security | Completed |
+| Day 4 | Authorization and RBAC | Planned |
+| Day 5 | Middleware and exception handling | Planned |
+| Day 6 | Redis caching and application configuration | Planned |
+| Day 7 | Background tasks and logging | Planned |
+| Day 8 | Docker and deployment | Planned |
 
-## Development Roadmap
+## Roadmap
 
-Features planned for subsequent development stages:
-
-- Role-based access control (RBAC).
+- Role-Based Access Control (RBAC).
 - Workspace and project business logic.
-- Task management and assignment workflows.
+- Task management and assignment.
+- Labels and comments.
 - Redis caching.
-- Middleware and advanced exception handling.
+- Middleware and centralized exception handling.
 - Background tasks and notifications.
-- Logging and production configuration.
-- Dockerized application deployment.
+- Structured logging.
+- Docker deployment improvements.
 
-## Notes
+## Development Notes
 
-- PostgreSQL is the selected database.
-- Database operations use asynchronous SQLAlchemy sessions.
-- Database schema changes should be managed through Alembic migrations.
-- Do not commit local `.env` files or database credentials.
-- Automated tests and manual checking scripts must be placed inside the `tests/` directory, not at the repository root.
+- Follow the layered architecture when adding new features.
+- Keep business logic in the service layer.
+- Keep database operations in repositories.
+- Use Pydantic schemas for request validation and response serialization.
+- Use Alembic for database schema changes.
+- Add automated tests for new functionality.
+- Keep manual check scripts inside the `tests/` directory; do not place them at the repository root.
+- Never commit `.env` files or production secrets.
 
 ## License
 
-This project is developed for learning and educational purposes.
+This project is developed for educational purposes.
