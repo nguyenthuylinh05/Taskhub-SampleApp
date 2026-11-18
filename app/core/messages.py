@@ -38,3 +38,16 @@ WORKSPACE_OWNER_CANNOT_BE_MEMBER = (
 )
 WORKSPACE_OWNER_CANNOT_BE_REMOVED = "Workspace owner cannot be removed"
 WORKSPACE_OWNER_ROLE_INVALID = "Workspace owner role cannot be assigned"
+
+# Task
+TASK_NOT_FOUND = "Task not found"
+TASK_ASSIGNEE_NOT_IN_WORKSPACE = (
+    "Task assignee must be a workspace member"
+)
+TASK_DUE_DATE_MUST_BE_FUTURE = "Due date must be in the future"
+
+# Task authorization and project state
+TASK_ASSIGNEE_MUST_HAVE_WRITE_ACCESS = (
+    "Task assignee must be a workspace owner or editor"
+)
+PROJECT_ARCHIVED = "Cannot modify tasks in an archived project"

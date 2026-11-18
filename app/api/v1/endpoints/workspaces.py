@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 
 from app.api.dependencies import (
     CurrentUserDep,
@@ -9,12 +9,7 @@ from app.api.dependencies import (
     require_workspace_member,
     require_workspace_owner,
 )
-from app.core.constants import (
-    DEFAULT_PAGE,
-    DEFAULT_PAGE_LIMIT,
-    MAX_PAGE_LIMIT,
-)
-from app.core.dependencies import WorkspaceServiceDep
+from app.core.dependencies import PaginationDep, WorkspaceServiceDep
 from app.schemas.workspace import (
     WorkspaceCreate,
     WorkspaceListResponse,
@@ -57,10 +52,9 @@ async def create_workspace(
 async def get_workspaces(
     current_user: CurrentUserDep,
     service: WorkspaceServiceDep,
-    page: Annotated[int, Query(ge=1)] = DEFAULT_PAGE,
-    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = DEFAULT_PAGE_LIMIT,
+    pagination: PaginationDep,
 ) -> WorkspaceListResponse:
-    return await service.get_workspaces(current_user, page, limit)
+    return await service.get_workspaces(current_user, pagination)
 
 
 @router.get("/{workspace_id}", response_model=WorkspaceResponse)
