@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Project, Task
 from app.models.enums import TaskPriority, TaskStatus
 from app.repositories.base import BaseRepository
+from app.schemas.pagination import Pagination
 
 
 class TaskRepository(BaseRepository[Task]):
@@ -17,21 +18,20 @@ class TaskRepository(BaseRepository[Task]):
     async def get_filtered_by_project(
         self,
         project_id: int,
-        status: TaskStatus | None = None,
-        priority: TaskPriority | None = None,
+        pagination: Pagination,
+        status: list[TaskStatus] | None = None,
+        priority: list[TaskPriority] | None = None,
         assignee_id: int | None = None,
-        page: int = 1,
-        limit: int = 10,
     ) -> tuple[list[Task], int]:
         """Get filtered and paginated tasks belonging to a project."""
 
         conditions = [Task.project_id == project_id]
 
-        if status is not None:
-            conditions.append(Task.status == status)
+        if status:
+            conditions.append(Task.status.in_(status))
 
-        if priority is not None:
-            conditions.append(Task.priority == priority)
+        if priority:
+            conditions.append(Task.priority.in_(priority))
 
         if assignee_id is not None:
             conditions.append(Task.assignee_id == assignee_id)
@@ -47,39 +47,13 @@ class TaskRepository(BaseRepository[Task]):
             select(Task)
             .where(*conditions)
             .order_by(Task.id)
-            .offset((page - 1) * limit)
-            .limit(limit)
+            .offset((pagination.page - 1) * pagination.limit)
+            .limit(pagination.limit)
         )
 
         result = await self.session.scalars(statement)
 
         return list(result.all()), total
-
-    async def get_by_project_id(self, project_id: int) -> list[Task]:
-        """Get all tasks belonging to a project, ordered by ID."""
-
-        statement = (
-            select(Task)
-            .where(Task.project_id == project_id)
-            .order_by(Task.id)
-        )
-        result = await self.session.scalars(statement)
-
-        return list(result.all())
-
-    async def get_in_project(
-        self,
-        task_id: int,
-        project_id: int,
-    ) -> Task | None:
-        """Get a task only if it belongs to the specified project."""
-
-        statement = select(Task).where(
-            Task.id == task_id,
-            Task.project_id == project_id,
-        )
-
-        return await self.session.scalar(statement)
 
     async def unassign_from_workspace(
         self,

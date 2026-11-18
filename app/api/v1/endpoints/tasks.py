@@ -1,4 +1,5 @@
 ﻿"""Task API endpoints."""
+
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response, status
@@ -55,8 +56,14 @@ async def get_tasks(
     current_user: CurrentUserDep,
     service: TaskServiceDep,
     pagination: PaginationDep,
-    task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
-    priority: TaskPriority | None = None,
+    task_status: Annotated[
+        list[TaskStatus] | None,
+        Query(alias="status"),
+    ] = None,
+    priority: Annotated[
+        list[TaskPriority] | None,
+        Query(),
+    ] = None,
     assignee_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> TaskListResponse:
     return await service.get_tasks(

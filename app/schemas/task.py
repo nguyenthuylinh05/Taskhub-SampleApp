@@ -2,18 +2,28 @@
 
 from datetime import datetime
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AwareDatetime, Field, field_validator, model_validator
 
 from app.core.constants import (
     TASK_TITLE_MAX_LENGTH,
     TASK_TITLE_MIN_LENGTH,
 )
 from app.core.messages import (
+    TASK_DUE_DATE_MUST_BE_FUTURE,
     UPDATE_FIELDS_CANNOT_BE_NULL,
     UPDATE_FIELDS_REQUIRED,
 )
 from app.models.enums import TaskPriority, TaskStatus
 from app.schemas.base import BaseSchema
+
+
+def validate_future_due_date(value: AwareDatetime | None) -> AwareDatetime | None:
+    """Reject due dates in the past."""
+
+    if value is not None and value <= datetime.now(value.tzinfo):
+        raise ValueError(TASK_DUE_DATE_MUST_BE_FUTURE)
+
+    return value
 
 
 class TaskCreate(BaseSchema):
@@ -37,22 +47,20 @@ class TaskCreate(BaseSchema):
         default=TaskPriority.MEDIUM,
         description="Task priority",
     )
-    due_date: datetime | None = Field(
+    due_date: AwareDatetime | None = Field(
         default=None,
         description="Task due date",
     )
+
     @field_validator("due_date")
     @classmethod
     def validate_due_date(
         cls,
-        value: datetime | None,
-    ) -> datetime | None:
-        """Require timezone-aware due dates."""
+        value: AwareDatetime | None,
+    ) -> AwareDatetime | None:
+        """Require a future timezone-aware due date."""
 
-        if value is not None and value.utcoffset() is None:
-            raise ValueError("Due date must include timezone information")
-
-        return value
+        return validate_future_due_date(value)
 
 
 class TaskUpdate(BaseSchema):
@@ -70,20 +78,17 @@ class TaskUpdate(BaseSchema):
     )
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
-    due_date: datetime | None = None
+    due_date: AwareDatetime | None = None
 
     @field_validator("due_date")
     @classmethod
     def validate_due_date(
         cls,
-        value: datetime | None,
-    ) -> datetime | None:
-        """Require timezone-aware due dates."""
+        value: AwareDatetime | None,
+    ) -> AwareDatetime | None:
+        """Require a future timezone-aware due date."""
 
-        if value is not None and value.utcoffset() is None:
-            raise ValueError("Due date must include timezone information")
-
-        return value
+        return validate_future_due_date(value)
 
     @model_validator(mode="after")
     def validate_update_fields(self) -> "TaskUpdate":

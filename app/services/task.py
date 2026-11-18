@@ -90,7 +90,7 @@ class TaskService:
         assignee = await self.user_repository.get_by_id(assignee_id)
 
         if assignee is None:
-            raise NotFoundException(USER_NOT_FOUND)
+            raise InvalidOperation(USER_NOT_FOUND)
 
         # Workspace owners do not need a membership record.
         if assignee_id == workspace.owner_id:
@@ -140,8 +140,8 @@ class TaskService:
         project_id: int,
         current_user: User,
         pagination: Pagination,
-        status: TaskStatus | None = None,
-        priority: TaskPriority | None = None,
+        status: list[TaskStatus] | None = None,
+        priority: list[TaskPriority] | None = None,
         assignee_id: int | None = None,
     ) -> TaskListResponse:
         """Get filtered and paginated tasks in a project."""
@@ -150,11 +150,10 @@ class TaskService:
 
         tasks, total = await self.task_repository.get_filtered_by_project(
             project_id=project_id,
+            pagination=pagination,
             status=status,
             priority=priority,
             assignee_id=assignee_id,
-            page=pagination.page,
-            limit=pagination.limit,
         )
 
         return TaskListResponse(

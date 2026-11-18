@@ -44,6 +44,7 @@ TASK_NOT_FOUND = "Task not found"
 TASK_ASSIGNEE_NOT_IN_WORKSPACE = (
     "Task assignee must be a workspace member"
 )
+TASK_DUE_DATE_MUST_BE_FUTURE = "Due date must be in the future"
 
 # Task authorization and project state
 TASK_ASSIGNEE_MUST_HAVE_WRITE_ACCESS = (

@@ -1,78 +1,15 @@
-from uuid import uuid4
+from collections.abc import Callable
 
 from fastapi.testclient import TestClient
 
 
-def register_and_login(
-    client: TestClient,
-    cleanup_user: list[int],
-) -> tuple[int, dict[str, str]]:
-    email = f"project_{uuid4().hex[:12]}@example.com"
-
-    register_response = client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": email,
-            "full_name": "Project Test User",
-            "password": "TestPassword123",
-        },
-    )
-    assert register_response.status_code == 201
-
-    user_id = register_response.json()["id"]
-    cleanup_user.append(user_id)
-
-    login_response = client.post(
-        "/api/v1/auth/login",
-        json={
-            "email": email,
-            "password": "TestPassword123",
-        },
-    )
-    assert login_response.status_code == 200
-
-    token = login_response.json()["access_token"]
-    return user_id, {"Authorization": f"Bearer {token}"}
-
-
-def create_test_workspace(
-    client: TestClient,
-    headers: dict[str, str],
-    cleanup_workspace: list[int],
-) -> int:
-    response = client.post(
-        "/api/v1/workspaces",
-        headers=headers,
-        json={"name": "Project Test Workspace"},
-    )
-    assert response.status_code == 201
-
-    workspace_id = response.json()["id"]
-
-    assert isinstance(workspace_id, int)
-
-    cleanup_workspace.append(workspace_id)
-    return workspace_id
-
-
-def test_health_check(client: TestClient) -> None:
-    response = client.get("/health")
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
-
-
 def test_create_and_get_project(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
-    _, headers = register_and_login(client, cleanup_user)
-    workspace_id = create_test_workspace(
-        client,
-        headers,
-        cleanup_workspace,
-    )
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
 
     base_url = f"/api/v1/workspaces/{workspace_id}/projects"
 
@@ -99,15 +36,11 @@ def test_create_and_get_project(
 
 def test_update_project(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
-    _, headers = register_and_login(client, cleanup_user)
-    workspace_id = create_test_workspace(
-        client,
-        headers,
-        cleanup_workspace,
-    )
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
 
     base_url = f"/api/v1/workspaces/{workspace_id}/projects"
 
@@ -132,15 +65,11 @@ def test_update_project(
 
 def test_delete_project(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
-    _, headers = register_and_login(client, cleanup_user)
-    workspace_id = create_test_workspace(
-        client,
-        headers,
-        cleanup_workspace,
-    )
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
 
     base_url = f"/api/v1/workspaces/{workspace_id}/projects"
 
@@ -168,17 +97,13 @@ def test_delete_project(
 
 def test_viewer_can_read_but_cannot_create_project(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
-    _, owner_headers = register_and_login(client, cleanup_user)
-    viewer_id, viewer_headers = register_and_login(client, cleanup_user)
+    _, owner_headers = register_and_login()
+    viewer_id, viewer_headers = register_and_login()
 
-    workspace_id = create_test_workspace(
-        client,
-        owner_headers,
-        cleanup_workspace,
-    )
+    workspace_id = create_test_workspace(owner_headers)
 
     add_response = client.post(
         f"/api/v1/workspaces/{workspace_id}/members",
@@ -210,17 +135,13 @@ def test_viewer_can_read_but_cannot_create_project(
 
 def test_editor_can_create_project(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
-    _, owner_headers = register_and_login(client, cleanup_user)
-    editor_id, editor_headers = register_and_login(client, cleanup_user)
+    _, owner_headers = register_and_login()
+    editor_id, editor_headers = register_and_login()
 
-    workspace_id = create_test_workspace(
-        client,
-        owner_headers,
-        cleanup_workspace,
-    )
+    workspace_id = create_test_workspace(owner_headers)
 
     add_response = client.post(
         f"/api/v1/workspaces/{workspace_id}/members",
@@ -251,15 +172,11 @@ def test_project_routes_require_authentication(
 
 def test_project_validation(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
-    _, headers = register_and_login(client, cleanup_user)
-    workspace_id = create_test_workspace(
-        client,
-        headers,
-        cleanup_workspace,
-    )
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
 
     response = client.post(
         f"/api/v1/workspaces/{workspace_id}/projects",
@@ -272,13 +189,13 @@ def test_project_validation(
 
 def test_viewer_cannot_update_or_delete_project(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
-    _, owner_headers = register_and_login(client, cleanup_user)
-    viewer_id, viewer_headers = register_and_login(client, cleanup_user)
+    _, owner_headers = register_and_login()
+    viewer_id, viewer_headers = register_and_login()
 
-    workspace_id = create_test_workspace(client, owner_headers, cleanup_workspace)
+    workspace_id = create_test_workspace(owner_headers)
     base_url = f"/api/v1/workspaces/{workspace_id}/projects"
 
     created = client.post(
@@ -312,13 +229,13 @@ def test_viewer_cannot_update_or_delete_project(
 
 def test_editor_can_update_and_delete_project(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
-    _, owner_headers = register_and_login(client, cleanup_user)
-    editor_id, editor_headers = register_and_login(client, cleanup_user)
+    _, owner_headers = register_and_login()
+    editor_id, editor_headers = register_and_login()
 
-    workspace_id = create_test_workspace(client, owner_headers, cleanup_workspace)
+    workspace_id = create_test_workspace(owner_headers)
     base_url = f"/api/v1/workspaces/{workspace_id}/projects"
 
     added = client.post(
@@ -353,17 +270,13 @@ def test_editor_can_update_and_delete_project(
 
 def test_update_project_rejects_null_name(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
     """A project name cannot be set to null."""
 
-    _, headers = register_and_login(client, cleanup_user)
-    workspace_id = create_test_workspace(
-        client,
-        headers,
-        cleanup_workspace,
-    )
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
 
     base_url = f"/api/v1/workspaces/{workspace_id}/projects"
 
@@ -395,17 +308,13 @@ def test_update_project_rejects_null_name(
 
 def test_project_name_rejects_whitespace_only(
     client: TestClient,
-    cleanup_user: list[int],
-    cleanup_workspace: list[int],
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
 ) -> None:
     """Project names containing only whitespace are invalid."""
 
-    _, headers = register_and_login(client, cleanup_user)
-    workspace_id = create_test_workspace(
-        client,
-        headers,
-        cleanup_workspace,
-    )
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
 
     base_url = f"/api/v1/workspaces/{workspace_id}/projects"
 

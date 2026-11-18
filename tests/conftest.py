@@ -1,8 +1,9 @@
 ﻿"""Shared fixtures for database and API tests."""
 
 import os
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import anyio
 import pytest
@@ -22,6 +23,68 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.pool import NullPool
+
+
+@pytest.fixture
+def register_and_login(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> Callable[[], tuple[int, dict[str, str]]]:
+    """Register a test user and return its ID and authentication headers."""
+
+    def _register_and_login() -> tuple[int, dict[str, str]]:
+        email = f"test_{uuid4().hex[:12]}@example.com"
+
+        register_response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": email,
+                "full_name": "Test User",
+                "password": "TestPassword123",
+            },
+        )
+        assert register_response.status_code == 201
+
+        user_id = register_response.json()["id"]
+        cleanup_user.append(user_id)
+
+        login_response = client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": email,
+                "password": "TestPassword123",
+            },
+        )
+        assert login_response.status_code == 200
+
+        token = login_response.json()["access_token"]
+        return user_id, {"Authorization": f"Bearer {token}"}
+
+    return _register_and_login
+
+
+@pytest.fixture
+def create_test_workspace(
+    client: TestClient,
+    cleanup_workspace: list[int],
+) -> Callable[[dict[str, str]], int]:
+    """Create a test workspace and register it for cleanup."""
+
+    def _create_test_workspace(headers: dict[str, str]) -> int:
+        response = client.post(
+            "/api/v1/workspaces",
+            headers=headers,
+            json={"name": "Test Workspace"},
+        )
+        assert response.status_code == 201
+
+        workspace_id = response.json()["id"]
+        assert isinstance(workspace_id, int)
+
+        cleanup_workspace.append(workspace_id)
+        return workspace_id
+
+    return _create_test_workspace
 
 
 @pytest.fixture(scope="session")
