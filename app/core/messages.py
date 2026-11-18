@@ -38,3 +38,9 @@ WORKSPACE_OWNER_CANNOT_BE_MEMBER = (
 )
 WORKSPACE_OWNER_CANNOT_BE_REMOVED = "Workspace owner cannot be removed"
 WORKSPACE_OWNER_ROLE_INVALID = "Workspace owner role cannot be assigned"
+
+# Task
+TASK_NOT_FOUND = "Task not found"
+TASK_ASSIGNEE_NOT_IN_WORKSPACE = (
+    "Task assignee must be a workspace member"
+)

@@ -12,6 +12,7 @@ from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.services.auth import AuthService
 from app.services.project import ProjectService
+from app.services.task import TaskService
 from app.services.user import UserService
 from app.services.workspace import WorkspaceService
 
@@ -134,6 +135,28 @@ def get_task_repository(
 TaskRepositoryDep = Annotated[
     TaskRepository,
     Depends(get_task_repository),
+]
+
+
+def get_task_service(
+    task_repository: TaskRepositoryDep,
+    project_repository: ProjectRepositoryDep,
+    workspace_repository: WorkspaceRepositoryDep,
+    user_repository: UserRepositoryDep,
+) -> TaskService:
+    """Create task service with injected repositories."""
+
+    return TaskService(
+        task_repository=task_repository,
+        project_repository=project_repository,
+        workspace_repository=workspace_repository,
+        user_repository=user_repository,
+    )
+
+
+TaskServiceDep = Annotated[
+    TaskService,
+    Depends(get_task_service),
 ]
 
 
