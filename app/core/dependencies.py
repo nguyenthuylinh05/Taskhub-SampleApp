@@ -1,8 +1,13 @@
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_LIMIT,
+    MAX_PAGE_LIMIT,
+)
 from app.core.database import get_db_session
 from app.repositories.comment import CommentRepository
 from app.repositories.label import LabelRepository
@@ -10,6 +15,7 @@ from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
+from app.schemas.pagination import Pagination
 from app.services.auth import AuthService
 from app.services.project import ProjectService
 from app.services.task import TaskService
@@ -19,6 +25,21 @@ from app.services.workspace import WorkspaceService
 DatabaseSessionDep = Annotated[
     AsyncSession,
     Depends(get_db_session),
+]
+
+
+def get_pagination(
+    page: int = Query(default=DEFAULT_PAGE, ge=1),
+    limit: int = Query(default=DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+) -> Pagination:
+    """Get validated pagination parameters."""
+
+    return Pagination(page=page, limit=limit)
+
+
+PaginationDep = Annotated[
+    Pagination,
+    Depends(get_pagination),
 ]
 
 
@@ -106,24 +127,6 @@ WorkspaceRepositoryDep = Annotated[
 ]
 
 
-def get_workspace_service(
-    workspace_repository: WorkspaceRepositoryDep,
-    user_repository: UserRepositoryDep,
-) -> WorkspaceService:
-    """Create workspace service with injected repositories."""
-
-    return WorkspaceService(
-        workspace_repository=workspace_repository,
-        user_repository=user_repository,
-    )
-
-
-WorkspaceServiceDep = Annotated[
-    WorkspaceService,
-    Depends(get_workspace_service),
-]
-
-
 def get_task_repository(
     session: DatabaseSessionDep,
 ) -> TaskRepository:
@@ -135,6 +138,25 @@ def get_task_repository(
 TaskRepositoryDep = Annotated[
     TaskRepository,
     Depends(get_task_repository),
+]
+
+
+def get_workspace_service(
+    workspace_repository: WorkspaceRepositoryDep,
+    user_repository: UserRepositoryDep,
+    task_repository: TaskRepositoryDep,
+) -> WorkspaceService:
+    """Create WorkspaceService with injected repositories."""
+
+    return WorkspaceService(
+        workspace_repository=workspace_repository,
+        user_repository=user_repository,
+        task_repository=task_repository,
+    )
+
+WorkspaceServiceDep = Annotated[
+    WorkspaceService,
+    Depends(get_workspace_service),
 ]
 
 

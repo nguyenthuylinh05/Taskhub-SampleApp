@@ -169,7 +169,7 @@ def test_update_task_and_assign_workspace_member(
         owner_headers,
         workspace_id,
         member_id,
-        "VIEWER",
+        "EDITOR",
     )
 
     create_response = client.post(
@@ -498,6 +498,52 @@ def test_task_validation(
         json={"title": None},
     )
     assert null_title.status_code == 422
+        # Timezone-aware due date is accepted.
+    valid_due_date = client.post(
+        url,
+        headers=headers,
+        json={
+            "title": "Task with timezone",
+            "due_date": "2026-12-01T10:00:00+07:00",
+        },
+    )
+    assert valid_due_date.status_code == 201
+
+    # Timezone-naive due date is rejected.
+    invalid_due_date = client.post(
+        url,
+        headers=headers,
+        json={
+            "title": "Task without timezone",
+            "due_date": "2026-12-01T10:00:00",
+        },
+    )
+    assert invalid_due_date.status_code == 422
+
+    # Timezone-aware due date can be updated.
+    valid_update = client.patch(
+        f"/api/v1/tasks/{task_id}",
+        headers=headers,
+        json={"due_date": "2026-12-15T15:30:00+07:00"},
+    )
+    assert valid_update.status_code == 200
+
+    # Timezone-naive due date cannot be updated.
+    invalid_update = client.patch(
+        f"/api/v1/tasks/{task_id}",
+        headers=headers,
+        json={"due_date": "2026-12-15T15:30:00"},
+    )
+    assert invalid_update.status_code == 422
+
+    # Due date can be cleared with null.
+    clear_due_date = client.patch(
+        f"/api/v1/tasks/{task_id}",
+        headers=headers,
+        json={"due_date": None},
+    )
+    assert clear_due_date.status_code == 200
+    assert clear_due_date.json()["due_date"] is None
 
 
 
@@ -725,3 +771,225 @@ def test_non_member_cannot_list_project_tasks(
     )
 
     assert response.status_code == 404
+
+
+def test_viewer_cannot_be_assigned_to_task(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    """A viewer cannot be assigned to a task."""
+
+    _, owner_headers = register_and_login(client, cleanup_user)
+    viewer_id, _ = register_and_login(client, cleanup_user)
+
+    workspace_id = create_test_workspace(
+        client,
+        owner_headers,
+        cleanup_workspace,
+    )
+    project_id = create_test_project(
+        client,
+        owner_headers,
+        workspace_id,
+    )
+
+    add_workspace_member(
+        client,
+        owner_headers,
+        workspace_id,
+        viewer_id,
+        "VIEWER",
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=owner_headers,
+        json={
+            "title": "Task assigned to viewer",
+            "assignee_id": viewer_id,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Task assignee must be a workspace owner or editor"
+    )
+
+
+def test_cannot_create_task_in_archived_project(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    """An archived project does not allow task creation."""
+
+    _, headers = register_and_login(client, cleanup_user)
+    workspace_id = create_test_workspace(
+        client,
+        headers,
+        cleanup_workspace,
+    )
+    project_id = create_test_project(
+        client,
+        headers,
+        workspace_id,
+    )
+
+    archive_response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/projects/{project_id}",
+        headers=headers,
+        json={"status": "ARCHIVED"},
+    )
+    assert archive_response.status_code == 200
+
+    create_response = client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=headers,
+        json={"title": "Task in archived project"},
+    )
+
+    assert create_response.status_code == 400
+    assert create_response.json()["detail"] == (
+        "Cannot modify tasks in an archived project"
+    )
+
+
+def test_cannot_update_task_in_archived_project(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    """An archived project does not allow task updates."""
+
+    _, headers = register_and_login(client, cleanup_user)
+    workspace_id = create_test_workspace(
+        client,
+        headers,
+        cleanup_workspace,
+    )
+    project_id = create_test_project(
+        client,
+        headers,
+        workspace_id,
+    )
+
+    task_response = client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=headers,
+        json={"title": "Original task"},
+    )
+    assert task_response.status_code == 201
+
+    task_id = task_response.json()["id"]
+
+    archive_response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/projects/{project_id}",
+        headers=headers,
+        json={"status": "ARCHIVED"},
+    )
+    assert archive_response.status_code == 200
+
+    update_response = client.patch(
+        f"/api/v1/tasks/{task_id}",
+        headers=headers,
+        json={"title": "Updated task"},
+    )
+
+    assert update_response.status_code == 400
+    assert update_response.json()["detail"] == (
+        "Cannot modify tasks in an archived project"
+    )
+
+
+def test_cannot_delete_task_in_archived_project(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    """An archived project does not allow task deletion."""
+
+    _, headers = register_and_login(client, cleanup_user)
+    workspace_id = create_test_workspace(
+        client,
+        headers,
+        cleanup_workspace,
+    )
+    project_id = create_test_project(
+        client,
+        headers,
+        workspace_id,
+    )
+
+    task_response = client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=headers,
+        json={"title": "Task to preserve"},
+    )
+    assert task_response.status_code == 201
+
+    task_id = task_response.json()["id"]
+
+    archive_response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/projects/{project_id}",
+        headers=headers,
+        json={"status": "ARCHIVED"},
+    )
+    assert archive_response.status_code == 200
+
+    delete_response = client.delete(
+        f"/api/v1/tasks/{task_id}",
+        headers=headers,
+    )
+
+    assert delete_response.status_code == 400
+    assert delete_response.json()["detail"] == (
+        "Cannot modify tasks in an archived project"
+    )
+
+
+def test_can_list_tasks_in_archived_project(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    """Workspace members can still list tasks in archived projects."""
+
+    _, headers = register_and_login(client, cleanup_user)
+    workspace_id = create_test_workspace(
+        client,
+        headers,
+        cleanup_workspace,
+    )
+    project_id = create_test_project(
+        client,
+        headers,
+        workspace_id,
+    )
+
+    task_response = client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=headers,
+        json={"title": "Existing task"},
+    )
+    assert task_response.status_code == 201
+
+    task_id = task_response.json()["id"]
+
+    archive_response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/projects/{project_id}",
+        headers=headers,
+        json={"status": "ARCHIVED"},
+    )
+    assert archive_response.status_code == 200
+
+    list_response = client.get(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=headers,
+    )
+
+    assert list_response.status_code == 200
+    result = list_response.json()
+    assert result["total"] == 1
+    assert len(result["items"]) == 1
+    assert result["items"][0]["id"] == task_id

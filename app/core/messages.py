@@ -44,3 +44,9 @@ TASK_NOT_FOUND = "Task not found"
 TASK_ASSIGNEE_NOT_IN_WORKSPACE = (
     "Task assignee must be a workspace member"
 )
+
+# Task authorization and project state
+TASK_ASSIGNEE_MUST_HAVE_WRITE_ACCESS = (
+    "Task assignee must be a workspace owner or editor"
+)
+PROJECT_ARCHIVED = "Cannot modify tasks in an archived project"

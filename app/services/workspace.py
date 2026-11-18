@@ -1,4 +1,3 @@
-from app.core.constants import DEFAULT_PAGE, DEFAULT_PAGE_LIMIT
 from app.core.exceptions import (
     ConflictError,
     InvalidOperation,
@@ -13,8 +12,10 @@ from app.core.messages import (
     WORKSPACE_OWNER_ROLE_INVALID,
 )
 from app.models import User, Workspace, WorkspaceRole
+from app.repositories.task import TaskRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
+from app.schemas.pagination import Pagination
 from app.schemas.workspace import (
     WorkspaceCreate,
     WorkspaceListResponse,
@@ -31,9 +32,11 @@ class WorkspaceService:
         self,
         workspace_repository: WorkspaceRepository,
         user_repository: UserRepository,
+        task_repository: TaskRepository,
     ) -> None:
         self.workspace_repository = workspace_repository
         self.user_repository = user_repository
+        self.task_repository = task_repository
 
     async def create_workspace(
         self,
@@ -48,16 +51,15 @@ class WorkspaceService:
     async def get_workspaces(
         self,
         current_user: User,
-        page: int = DEFAULT_PAGE,
-        limit: int = DEFAULT_PAGE_LIMIT,
+        pagination: Pagination,
     ) -> WorkspaceListResponse:
         (
             workspaces,
             total,
         ) = await self.workspace_repository.get_user_workspaces_paginated(
             current_user.id,
-            page,
-            limit,
+            pagination.page,
+            pagination.limit,
         )
 
         return WorkspaceListResponse(
@@ -65,8 +67,8 @@ class WorkspaceService:
                 WorkspaceResponse.model_validate(workspace) for workspace in workspaces
             ],
             total=total,
-            page=page,
-            limit=limit,
+            page=pagination.page,
+            limit=pagination.limit,
         )
 
     async def get_workspace_members(
@@ -145,6 +147,19 @@ class WorkspaceService:
     ) -> None:
         if workspace.owner_id == user_id:
             raise InvalidOperation(WORKSPACE_OWNER_CANNOT_BE_REMOVED)
+
+        existing_role = await self.workspace_repository.get_member(
+            workspace.id,
+            user_id,
+        )
+
+        if existing_role is None:
+            raise NotFoundException(WORKSPACE_MEMBER_NOT_FOUND)
+
+        await self.task_repository.unassign_from_workspace(
+            workspace.id,
+            user_id,
+        )
 
         removed = await self.workspace_repository.remove_member(
             workspace.id,

@@ -1,9 +1,9 @@
 ﻿"""Repository for task database operations."""
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Task
+from app.models import Project, Task
 from app.models.enums import TaskPriority, TaskStatus
 from app.repositories.base import BaseRepository
 
@@ -80,3 +80,25 @@ class TaskRepository(BaseRepository[Task]):
         )
 
         return await self.session.scalar(statement)
+
+    async def unassign_from_workspace(
+        self,
+        workspace_id: int,
+        user_id: int,
+    ) -> None:
+        """Unassign a user from tasks in a specific workspace."""
+
+        project_ids = select(Project.id).where(
+            Project.workspace_id == workspace_id,
+        )
+
+        statement = (
+            update(Task)
+            .where(
+                Task.project_id.in_(project_ids),
+                Task.assignee_id == user_id,
+            )
+            .values(assignee_id=None)
+        )
+
+        await self.session.execute(statement)

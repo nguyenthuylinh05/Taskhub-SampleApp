@@ -9,6 +9,7 @@ from app.core.constants import (
     PROJECT_NAME_MAX_LENGTH,
     PROJECT_NAME_MIN_LENGTH,
 )
+from app.models.enums import ProjectStatus
 from app.schemas.base import BaseSchema
 
 
@@ -39,6 +40,7 @@ class ProjectUpdate(BaseSchema):
         default=None,
         max_length=PROJECT_DESCRIPTION_MAX_LENGTH,
     )
+    status: ProjectStatus | None = None
 
     @field_validator("name", mode="before")
     @classmethod

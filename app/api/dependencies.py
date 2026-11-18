@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Annotated
 
 import jwt
@@ -12,21 +11,17 @@ from app.core.dependencies import WorkspaceRepositoryDep
 from app.core.exceptions import (
     InactiveUser,
     InvalidCredentials,
-    NotFoundException,
     PermissionDenied,
 )
 from app.core.security import decode_token
-from app.models import User, UserRole, Workspace, WorkspaceRole
+from app.models import User, UserRole, WorkspaceRole
 from app.repositories.user import UserRepository
-
-
-@dataclass
-class WorkspaceAccess:
-    """Authenticated user's access to a workspace."""
-
-    workspace: Workspace
-    role: WorkspaceRole
-
+from app.services.workspace_access import (
+    WorkspaceAccess as WorkspaceAccess,
+)
+from app.services.workspace_access import (
+    resolve_workspace_access,
+)
 
 bearer_scheme = HTTPBearer()
 
@@ -82,28 +77,11 @@ async def get_workspace_access(
 ) -> WorkspaceAccess:
     """Get the current user's access to a workspace."""
 
-    workspace = await workspace_repository.get_by_id(workspace_id)
-
-    if workspace is None:
-        raise NotFoundException()
-
-    # System administrator has access to every workspace.
-    if current_user.role == UserRole.ADMIN:
-        return WorkspaceAccess(workspace, WorkspaceRole.OWNER)
-
-    # Workspace owner does not need a membership record.
-    if workspace.owner_id == current_user.id:
-        return WorkspaceAccess(workspace, WorkspaceRole.OWNER)
-
-    role = await workspace_repository.get_member(
+    return await resolve_workspace_access(
         workspace_id,
-        current_user.id,
+        current_user,
+        workspace_repository,
     )
-
-    if role is None:
-        raise NotFoundException()
-
-    return WorkspaceAccess(workspace, role)
 
 
 async def require_workspace_member(
