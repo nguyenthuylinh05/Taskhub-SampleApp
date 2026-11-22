@@ -10,6 +10,8 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exception_handlers import app_exception_handler
 from app.core.exceptions import AppException
+from app.core.logging import configure_logging
+from app.middleware.request_logging import RequestLoggingMiddleware
 
 settings = get_settings()
 
@@ -17,6 +19,8 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage application startup and shutdown."""
+
+    configure_logging(settings.LOG_LEVEL)
 
     try:
         yield
@@ -30,6 +34,8 @@ app = FastAPI(
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )
+
+app.add_middleware(RequestLoggingMiddleware)
 
 app.add_exception_handler(
     AppException,

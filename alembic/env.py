@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(
+        config.config_file_name,
+        disable_existing_loggers=False,
+    )
 
 # Để Alembic nhận diện toàn bộ 8 bảng.
 target_metadata = Base.metadata

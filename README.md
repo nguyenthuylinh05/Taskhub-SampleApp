@@ -1,4 +1,4 @@
-# TaskHub - Task Management API
+﻿# TaskHub - Task Management API
 
 A RESTful Task Management API built with **FastAPI**, **SQLAlchemy 2.x**, **PostgreSQL**, and **Redis**.
 
@@ -63,7 +63,8 @@ PostgreSQL
 | Repositories | Encapsulates database queries and CRUD operations |
 | Models | Defines SQLAlchemy database models and relationships |
 | Schemas | Defines Pydantic request and response schemas |
-| Core | Contains configuration, security, exceptions, database setup, and Redis integration |
+| Core | Contains configuration, security, exceptions, database setup, logging, and Redis integration |
+| Middleware | Handles cross-cutting HTTP request processing, including request logging |
 
 ### Database
 
@@ -137,9 +138,14 @@ Taskhub-SampleApp/
 │   │   ├── dependencies.py
 │   │   ├── exceptions.py
 │   │   ├── exception_handlers.py
+│   │   ├── logging.py
 │   │   ├── messages.py
 │   │   ├── redis.py
 │   │   └── security.py
+│   │
+│   ├── middleware/
+│   │   ├── __init__.py
+│   │   └── request_logging.py
 │   │
 │   ├── models/
 │   │   ├── base.py
@@ -185,6 +191,8 @@ Taskhub-SampleApp/
 │   ├── test_admin_concurrency.py
 │   ├── test_auth.py
 │   ├── test_authorization.py
+│   ├── test_exception_handlers.py
+│   ├── test_middleware.py
 │   ├── test_projects.py
 │   ├── test_redis_integration.py
 │   ├── test_repositories.py
@@ -458,9 +466,82 @@ Examples of application-level errors include:
 
 ---
 
+## Request Logging
+
+TaskHub uses a custom **Pure ASGI request logging middleware** to record HTTP request information.
+
+The middleware is implemented in `app/middleware/request_logging.py` and configured through the application's logging setup.
+
+### Request Logging Features
+
+The middleware records:
+
+- HTTP method.
+- Request path.
+- HTTP response status code.
+- Request processing time in milliseconds.
+- Request ID for request tracing.
+
+### Log Levels
+
+Log levels are selected according to the HTTP response status code:
+
+| HTTP Status Code | Log Level |
+|---|---|
+| 2xx / 3xx | INFO |
+| 4xx | WARNING |
+| 5xx | ERROR |
+
+### Request ID
+
+The middleware supports request tracing through the `X-Request-ID` header.
+
+- If a valid `X-Request-ID` is provided, the middleware reuses it.
+- If the header is missing or invalid, the middleware generates a new request ID.
+- The request ID is included in the response headers and request log messages.
+
+Example response header:
+
+```http
+X-Request-ID: 1234567890abcdef
+```
+
+### Sensitive Information
+
+To avoid exposing sensitive information:
+
+- Query strings are excluded from request logs.
+- Authorization headers and access tokens are not logged.
+- Unhandled exceptions are logged as a single ERROR-level request summary without exception details or traceback.
+- Exceptions are re-raised so the ASGI server can handle them and record the traceback.
+
+### Logging Configuration
+
+Logging is configured through the `LOG_LEVEL` environment variable.
+
+Supported values:
+
+| Value | Description |
+|---|---|
+| DEBUG | Detailed debugging information |
+| INFO | General application and request information |
+| WARNING | Warning messages |
+| ERROR | Error messages |
+| CRITICAL | Critical errors |
+
+Default value:
+
+```env
+LOG_LEVEL=INFO
+```
+
+Update `LOG_LEVEL` in your `.env` file to change the application's logging level.
+
+---
+
 ## Testing
 
-The project uses Pytest and HTTPX to test API endpoints, business logic, repositories, authorization, and integrations.
+The project uses Pytest and HTTPX to test API endpoints, business logic, repositories, authorization, middleware, and integrations.
 
 Run the complete test suite:
 
@@ -492,6 +573,18 @@ Run project tests:
 uv run pytest tests/test_projects.py -v
 ```
 
+Run request logging middleware tests:
+
+```bash
+uv run pytest tests/test_middleware.py -v
+```
+
+Run exception handler tests:
+
+```bash
+uv run pytest tests/test_exception_handlers.py -v
+```
+
 ### Test Coverage
 
 The test suite includes:
@@ -506,6 +599,8 @@ The test suite includes:
 | `test_projects.py` | Project CRUD and workspace-level authorization |
 | `test_repositories.py` | Repository operations |
 | `test_redis_integration.py` | Redis integration, refresh-token rotation, reuse detection, and revocation |
+| `test_exception_handlers.py` | Application exception handling and HTTP error responses |
+| `test_middleware.py` | Request logging, status-based log levels, request IDs, and sensitive information protection |
 
 ### Redis Integration Tests
 
@@ -555,6 +650,10 @@ The project is developed incrementally according to the FastAPI module curriculu
 | Day 2 | SQLAlchemy 2.x Async & Alembic | Completed |
 | Day 3 | Authentication & Security | Completed |
 | Day 4 | Authorization & RBAC | Completed |
+| Day 5 | Task Management | In Progress |
+| Day 6 | Label & Comment Management | Not Started |
+| Day 7 | Searching, Filtering, Pagination & Caching | Not Started |
+| Day 8 | Background Tasks, Swagger API & Docker Setup | Not Started |
 
 ### Day 4 Verification
 
