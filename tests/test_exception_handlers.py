@@ -1,4 +1,4 @@
-﻿"""Tests for global application exception handlers."""
+"""Tests for global application exception handlers."""
 
 import anyio
 from app.core.exception_handlers import app_exception_handler

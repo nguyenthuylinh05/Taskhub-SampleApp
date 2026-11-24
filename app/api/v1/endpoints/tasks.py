@@ -1,4 +1,4 @@
-﻿"""Task API endpoints."""
+"""Task API endpoints."""
 
 from typing import Annotated
 
@@ -24,9 +24,7 @@ router = APIRouter(tags=["Tasks"])
     summary="Create a task in a project",
     responses={
         400: {
-            "description": (
-                "Task assignment or project state violates business rules"
-            ),
+            "description": ("Task assignment or project state violates business rules"),
         },
         401: {"description": "Not authenticated"},
         403: {"description": "Insufficient workspace permissions"},

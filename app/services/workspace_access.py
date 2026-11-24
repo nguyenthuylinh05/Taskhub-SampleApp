@@ -1,4 +1,4 @@
-﻿"""Shared workspace access resolution and authorization policy."""
+"""Shared workspace access resolution and authorization policy."""
 
 from dataclasses import dataclass
 
@@ -13,6 +13,12 @@ class WorkspaceAccess:
 
     workspace: Workspace
     role: WorkspaceRole
+
+
+def has_workspace_write_access(role: WorkspaceRole) -> bool:
+    """Return whether a workspace role can modify workspace resources."""
+
+    return role in (WorkspaceRole.OWNER, WorkspaceRole.EDITOR)
 
 
 async def resolve_workspace_access(

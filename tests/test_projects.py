@@ -27,6 +27,7 @@ def test_create_and_get_project(
     assert project["name"] == "Website Project"
     assert project["description"] == "Build company website"
     assert project["workspace_id"] == workspace_id
+    assert project["status"] == "ACTIVE"
 
     get_response = client.get(base_url, headers=headers)
 
@@ -260,6 +261,7 @@ def test_editor_can_update_and_delete_project(
     )
     assert update.status_code == 200
     assert update.json()["name"] == "Updated By Editor"
+    assert update.json()["status"] == "ACTIVE"
 
     delete_response = client.delete(
         f"{base_url}/{project_id}",
@@ -304,6 +306,35 @@ def test_update_project_rejects_null_name(
 
     assert get_response.status_code == 200
     assert get_response.json()["name"] == "Original Project Name"
+
+
+def test_update_project_rejects_null_status(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+) -> None:
+    """A project status cannot be set to null."""
+
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    base_url = f"/api/v1/workspaces/{workspace_id}/projects"
+
+    created = client.post(base_url, headers=headers, json={"name": "Project"})
+    assert created.status_code == 201
+    project_id = created.json()["id"]
+
+    response = client.patch(
+        f"{base_url}/{project_id}",
+        headers=headers,
+        json={"status": None},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == ("Value error, Fields cannot be null")
+
+    get_response = client.get(f"{base_url}/{project_id}", headers=headers)
+    assert get_response.status_code == 200
+    assert get_response.json()["status"] == "ACTIVE"
 
 
 def test_project_name_rejects_whitespace_only(

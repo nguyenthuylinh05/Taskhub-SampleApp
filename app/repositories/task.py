@@ -1,4 +1,4 @@
-﻿"""Repository for task database operations."""
+"""Repository for task database operations."""
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,11 +36,7 @@ class TaskRepository(BaseRepository[Task]):
         if assignee_id is not None:
             conditions.append(Task.assignee_id == assignee_id)
 
-        total_statement = (
-            select(func.count())
-            .select_from(Task)
-            .where(*conditions)
-        )
+        total_statement = select(func.count()).select_from(Task).where(*conditions)
         total = await self.session.scalar(total_statement) or 0
 
         statement = (

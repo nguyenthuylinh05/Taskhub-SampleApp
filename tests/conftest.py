@@ -1,4 +1,4 @@
-﻿"""Shared fixtures for database and API tests."""
+"""Shared fixtures for database and API tests."""
 
 import os
 from collections.abc import AsyncGenerator, Callable, Generator
@@ -14,9 +14,9 @@ from alembic.config import Config
 from app.core.config import settings
 from app.core.database import get_db_session
 from app.main import app
-from app.models import User, Workspace
+from app.models import User, UserRole, Workspace
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -85,6 +85,79 @@ def create_test_workspace(
         return workspace_id
 
     return _create_test_workspace
+
+
+@pytest.fixture
+def create_test_project(
+    client: TestClient,
+) -> Callable[[dict[str, str], int], int]:
+    """Create a test project through the public API."""
+
+    def _create_test_project(headers: dict[str, str], workspace_id: int) -> int:
+        response = client.post(
+            f"/api/v1/workspaces/{workspace_id}/projects",
+            headers=headers,
+            json={"name": "Task Test Project"},
+        )
+        assert response.status_code == 201
+        project_id = response.json()["id"]
+        assert isinstance(project_id, int)
+        return project_id
+
+    return _create_test_project
+
+
+@pytest.fixture
+def add_workspace_member(
+    client: TestClient,
+) -> Callable[[dict[str, str], int, int, str], None]:
+    """Add a test user to a workspace through the public API."""
+
+    def _add_workspace_member(
+        headers: dict[str, str],
+        workspace_id: int,
+        user_id: int,
+        role: str,
+    ) -> None:
+        response = client.post(
+            f"/api/v1/workspaces/{workspace_id}/members",
+            headers=headers,
+            json={"user_id": user_id, "role": role},
+        )
+        assert response.status_code == 201
+
+    return _add_workspace_member
+
+
+@pytest.fixture
+def promote_to_admin() -> Callable[[int], None]:
+    """Promote a test user to ADMIN directly in the test database."""
+
+    def _promote_to_admin(user_id: int) -> None:
+        async def update_role() -> None:
+            test_engine = create_async_engine(
+                settings.TEST_DATABASE_URL,
+                poolclass=NullPool,
+            )
+            session_factory = async_sessionmaker(
+                test_engine,
+                expire_on_commit=False,
+            )
+
+            try:
+                async with session_factory() as session:
+                    await session.execute(
+                        update(User)
+                        .where(User.id == user_id)
+                        .values(role=UserRole.ADMIN)
+                    )
+                    await session.commit()
+            finally:
+                await test_engine.dispose()
+
+        anyio.run(update_role)
+
+    return _promote_to_admin
 
 
 @pytest.fixture(scope="session")

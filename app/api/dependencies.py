@@ -20,6 +20,7 @@ from app.services.workspace_access import (
     WorkspaceAccess as WorkspaceAccess,
 )
 from app.services.workspace_access import (
+    has_workspace_write_access,
     resolve_workspace_access,
 )
 
@@ -103,10 +104,7 @@ async def require_workspace_editor(
 ) -> WorkspaceAccess:
     """Require OWNER or EDITOR role."""
 
-    if workspace_access.role not in (
-        WorkspaceRole.OWNER,
-        WorkspaceRole.EDITOR,
-    ):
+    if not has_workspace_write_access(workspace_access.role):
         raise PermissionDenied()
 
     return workspace_access

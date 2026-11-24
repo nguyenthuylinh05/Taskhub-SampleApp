@@ -58,8 +58,7 @@ class WorkspaceService:
             total,
         ) = await self.workspace_repository.get_user_workspaces_paginated(
             current_user.id,
-            pagination.page,
-            pagination.limit,
+            pagination,
         )
 
         return WorkspaceListResponse(

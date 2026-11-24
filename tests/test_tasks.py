@@ -1,91 +1,26 @@
-﻿from collections.abc import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
-import anyio
-from app.core.config import settings
-from app.models import User, UserRole
 from fastapi.testclient import TestClient
-from sqlalchemy import update
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
 
-def promote_to_admin(user_id: int) -> None:
-    """Promote a test user to ADMIN directly in the database."""
+def future_due_date() -> str:
+    """Return an aware due date safely in the future for validation tests."""
 
-    async def update_role() -> None:
-        test_engine = create_async_engine(
-            settings.TEST_DATABASE_URL,
-            poolclass=NullPool,
-        )
-        session_factory = async_sessionmaker(
-            test_engine,
-            expire_on_commit=False,
-        )
-
-        try:
-            async with session_factory() as session:
-                await session.execute(
-                    update(User)
-                    .where(User.id == user_id)
-                    .values(role=UserRole.ADMIN)
-                )
-                await session.commit()
-        finally:
-            await test_engine.dispose()
-
-    anyio.run(update_role)
-
-
-def create_test_project(
-    client: TestClient,
-    headers: dict[str, str],
-    workspace_id: int,
-) -> int:
-    """Create a project inside a workspace."""
-
-    response = client.post(
-        f"/api/v1/workspaces/{workspace_id}/projects",
-        headers=headers,
-        json={"name": "Task Test Project"},
-    )
-    assert response.status_code == 201
-
-    project_id = response.json()["id"]
-    assert isinstance(project_id, int)
-
-    return project_id
-
-
-def add_workspace_member(
-    client: TestClient,
-    headers: dict[str, str],
-    workspace_id: int,
-    user_id: int,
-    role: str,
-) -> None:
-    """Add a user to a workspace with the specified role."""
-
-    response = client.post(
-        f"/api/v1/workspaces/{workspace_id}/members",
-        headers=headers,
-        json={
-            "user_id": user_id,
-            "role": role,
-        },
-    )
-    assert response.status_code == 201
+    return (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
 
 def test_create_and_list_tasks(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """Create tasks and list them in a project."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
 
     url = f"/api/v1/projects/{project_id}/tasks"
 
@@ -121,6 +56,8 @@ def test_update_task_and_assign_workspace_member(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
 ) -> None:
     """Update task fields and assign a workspace member."""
 
@@ -128,10 +65,9 @@ def test_update_task_and_assign_workspace_member(
     member_id, _ = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     add_workspace_member(
-        client,
         owner_headers,
         workspace_id,
         member_id,
@@ -156,7 +92,7 @@ def test_update_task_and_assign_workspace_member(
             "assignee_id": member_id,
             "status": "IN_PROGRESS",
             "priority": "HIGH",
-            "due_date": "2026-12-31T23:59:00Z",
+            "due_date": future_due_date(),
         },
     )
 
@@ -175,6 +111,8 @@ def test_unassign_workspace_member_from_task(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
 ) -> None:
     """An assigned workspace member can be removed from a task."""
 
@@ -182,10 +120,9 @@ def test_unassign_workspace_member_from_task(
     member_id, _ = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     add_workspace_member(
-        client,
         owner_headers,
         workspace_id,
         member_id,
@@ -219,12 +156,13 @@ def test_delete_task(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """Delete a task from a project."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
 
     create_response = client.post(
         f"/api/v1/projects/{project_id}/tasks",
@@ -250,16 +188,15 @@ def test_delete_task(
 
     assert get_response.status_code == 200
     assert get_response.json()["total"] == 0
-    assert all(
-        task["id"] != task_id
-        for task in get_response.json()["items"]
-    )
+    assert all(task["id"] != task_id for task in get_response.json()["items"])
 
 
 def test_viewer_can_read_but_cannot_modify_tasks(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
 ) -> None:
     """A viewer can list tasks but cannot create, update, or delete them."""
 
@@ -267,10 +204,9 @@ def test_viewer_can_read_but_cannot_modify_tasks(
     viewer_id, viewer_headers = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     add_workspace_member(
-        client,
         owner_headers,
         workspace_id,
         viewer_id,
@@ -319,6 +255,8 @@ def test_editor_can_create_update_and_delete_tasks(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
 ) -> None:
     """An editor can manage tasks in the workspace."""
 
@@ -326,7 +264,7 @@ def test_editor_can_create_update_and_delete_tasks(
     _, editor_headers = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     editor_id = client.get(
         "/api/v1/users/me",
@@ -334,7 +272,6 @@ def test_editor_can_create_update_and_delete_tasks(
     ).json()["id"]
 
     add_workspace_member(
-        client,
         owner_headers,
         workspace_id,
         editor_id,
@@ -371,6 +308,7 @@ def test_task_assignee_must_belong_to_workspace(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """A user outside the workspace cannot be assigned to a task."""
 
@@ -378,7 +316,7 @@ def test_task_assignee_must_belong_to_workspace(
     outsider_id, _ = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     response = client.post(
         f"/api/v1/projects/{project_id}/tasks",
@@ -390,21 +328,20 @@ def test_task_assignee_must_belong_to_workspace(
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == (
-        "Task assignee must be a workspace member"
-    )
+    assert response.json()["detail"] == ("Task assignee must be a workspace member")
 
 
 def test_nonexistent_assignee_returns_bad_request(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """An assignee ID that does not exist returns 400."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
 
     response = client.post(
         f"/api/v1/projects/{project_id}/tasks",
@@ -450,12 +387,13 @@ def test_task_validation(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """Validate task fields, due dates, and empty updates."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
 
     url = f"/api/v1/projects/{project_id}/tasks"
 
@@ -538,7 +476,7 @@ def test_task_validation(
         headers=headers,
         json={
             "title": "Task with timezone",
-            "due_date": "2026-12-01T10:00:00+07:00",
+            "due_date": future_due_date(),
         },
     )
     assert valid_due_date.status_code == 201
@@ -569,7 +507,7 @@ def test_task_validation(
     valid_update = client.patch(
         f"/api/v1/tasks/{task_id}",
         headers=headers,
-        json={"due_date": "2026-12-15T15:30:00+07:00"},
+        json={"due_date": future_due_date()},
     )
     assert valid_update.status_code == 200
 
@@ -603,12 +541,13 @@ def test_filter_tasks_by_status(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """Filter project tasks by status."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
     url = f"/api/v1/projects/{project_id}/tasks"
 
     for title, task_status in [
@@ -648,6 +587,8 @@ def test_filter_tasks_by_priority_and_assignee(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
 ) -> None:
     """Filter tasks by priority and assignee together."""
 
@@ -655,10 +596,9 @@ def test_filter_tasks_by_priority_and_assignee(
     assignee_id, _ = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     add_workspace_member(
-        client,
         owner_headers,
         workspace_id,
         assignee_id,
@@ -703,12 +643,13 @@ def test_task_pagination(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """Return the requested page and total matching task count."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
     url = f"/api/v1/projects/{project_id}/tasks"
 
     for index in range(5):
@@ -739,12 +680,13 @@ def test_task_pagination_empty_page(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """An out-of-range page returns an empty item list."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
     url = f"/api/v1/projects/{project_id}/tasks"
 
     response = client.post(
@@ -772,12 +714,13 @@ def test_task_pagination_validation(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """Reject invalid pagination parameters."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
     url = f"/api/v1/projects/{project_id}/tasks"
 
     for params in [
@@ -797,6 +740,7 @@ def test_non_member_cannot_list_project_tasks(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """A user outside the workspace cannot list its project tasks."""
 
@@ -804,7 +748,7 @@ def test_non_member_cannot_list_project_tasks(
     _, outsider_headers = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     response = client.get(
         f"/api/v1/projects/{project_id}/tasks",
@@ -818,6 +762,7 @@ def test_non_member_cannot_create_update_or_delete_tasks(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """A user outside the workspace cannot modify its tasks."""
 
@@ -825,7 +770,7 @@ def test_non_member_cannot_create_update_or_delete_tasks(
     _, outsider_headers = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     task_response = client.post(
         f"/api/v1/projects/{project_id}/tasks",
@@ -869,6 +814,8 @@ def test_viewer_cannot_be_assigned_to_task(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
 ) -> None:
     """A viewer cannot be assigned to a task."""
 
@@ -876,10 +823,9 @@ def test_viewer_cannot_be_assigned_to_task(
     viewer_id, _ = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     add_workspace_member(
-        client,
         owner_headers,
         workspace_id,
         viewer_id,
@@ -905,12 +851,13 @@ def test_cannot_create_task_in_archived_project(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """An archived project does not allow task creation."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
 
     archive_response = client.patch(
         f"/api/v1/workspaces/{workspace_id}/projects/{project_id}",
@@ -935,12 +882,13 @@ def test_cannot_update_task_in_archived_project(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """An archived project does not allow task updates."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
 
     task_response = client.post(
         f"/api/v1/projects/{project_id}/tasks",
@@ -974,12 +922,13 @@ def test_cannot_delete_task_in_archived_project(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """An archived project does not allow task deletion."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
 
     task_response = client.post(
         f"/api/v1/projects/{project_id}/tasks",
@@ -1012,12 +961,13 @@ def test_can_list_tasks_in_archived_project(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """Workspace members can still list tasks in archived projects."""
 
     _, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
-    project_id = create_test_project(client, headers, workspace_id)
+    project_id = create_test_project(headers, workspace_id)
 
     task_response = client.post(
         f"/api/v1/projects/{project_id}/tasks",
@@ -1051,6 +1001,8 @@ def test_admin_can_access_tasks_without_workspace_membership(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    promote_to_admin: Callable[[int], None],
 ) -> None:
     """An admin can access workspace tasks without membership."""
 
@@ -1058,7 +1010,7 @@ def test_admin_can_access_tasks_without_workspace_membership(
     admin_id, admin_headers = register_and_login()
 
     workspace_id = create_test_workspace(owner_headers)
-    project_id = create_test_project(client, owner_headers, workspace_id)
+    project_id = create_test_project(owner_headers, workspace_id)
 
     task_response = client.post(
         f"/api/v1/projects/{project_id}/tasks",
@@ -1086,10 +1038,12 @@ def test_admin_can_access_tasks_without_workspace_membership(
 
     assert create_response.status_code == 201
 
+
 def test_member_cannot_access_tasks_from_another_workspace(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
 ) -> None:
     """A workspace member cannot access tasks from another workspace."""
 
@@ -1101,12 +1055,10 @@ def test_member_cannot_access_tasks_from_another_workspace(
     workspace_b_id = create_test_workspace(owner_b_headers)
 
     project_a_id = create_test_project(
-        client,
         owner_a_headers,
         workspace_a_id,
     )
     project_b_id = create_test_project(
-        client,
         owner_b_headers,
         workspace_b_id,
     )
@@ -1133,6 +1085,12 @@ def test_member_cannot_access_tasks_from_another_workspace(
         headers=owner_b_headers,
     )
     assert list_response.status_code == 404
+    missing_project_response = client.get(
+        f"/api/v1/projects/{project_a_id + 1000000}/tasks",
+        headers=owner_b_headers,
+    )
+    assert missing_project_response.status_code == 404
+    assert list_response.json() == missing_project_response.json()
 
     # Workspace B owner cannot update a task from workspace A.
     update_response = client.patch(
@@ -1141,6 +1099,13 @@ def test_member_cannot_access_tasks_from_another_workspace(
         json={"title": "Unauthorized update"},
     )
     assert update_response.status_code == 404
+    missing_task_update = client.patch(
+        f"/api/v1/tasks/{task_a_id + 1000000}",
+        headers=owner_b_headers,
+        json={"title": "Missing task"},
+    )
+    assert missing_task_update.status_code == 404
+    assert update_response.json() == missing_task_update.json()
 
     # Workspace B owner cannot delete a task from workspace A.
     delete_response = client.delete(
@@ -1148,6 +1113,12 @@ def test_member_cannot_access_tasks_from_another_workspace(
         headers=owner_b_headers,
     )
     assert delete_response.status_code == 404
+    missing_task_delete = client.delete(
+        f"/api/v1/tasks/{task_a_id + 1000000}",
+        headers=owner_b_headers,
+    )
+    assert missing_task_delete.status_code == 404
+    assert delete_response.json() == missing_task_delete.json()
 
     # The task in workspace A must remain unchanged.
     owner_a_response = client.get(
@@ -1156,9 +1127,7 @@ def test_member_cannot_access_tasks_from_another_workspace(
     )
     assert owner_a_response.status_code == 200
     assert owner_a_response.json()["total"] == 1
-    assert owner_a_response.json()["items"][0]["title"] == (
-        "Task in workspace A"
-    )
+    assert owner_a_response.json()["items"][0]["title"] == ("Task in workspace A")
 
     # Workspace B owner can still access their own task.
     owner_b_response = client.get(
@@ -1167,6 +1136,4 @@ def test_member_cannot_access_tasks_from_another_workspace(
     )
     assert owner_b_response.status_code == 200
     assert owner_b_response.json()["total"] == 1
-    assert owner_b_response.json()["items"][0]["title"] == (
-        "Task in workspace B"
-    )
+    assert owner_b_response.json()["items"][0]["title"] == ("Task in workspace B")

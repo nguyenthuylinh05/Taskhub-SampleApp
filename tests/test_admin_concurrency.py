@@ -15,7 +15,9 @@ from sqlalchemy.pool import NullPool
 
 
 @pytest.mark.asyncio
-async def test_concurrent_admin_demotion_preserves_one_active_admin() -> None:
+async def test_concurrent_admin_demotion_preserves_one_active_admin(
+    migrated_test_database: None,
+) -> None:
     """Concurrent demotions must never remove the last active admin."""
 
     engine = create_async_engine(

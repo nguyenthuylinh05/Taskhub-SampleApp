@@ -1,4 +1,4 @@
-﻿"""Task request and response schemas."""
+"""Task request and response schemas."""
 
 from datetime import datetime
 
@@ -100,8 +100,7 @@ class TaskUpdate(BaseSchema):
         required_fields = ("title", "status", "priority")
 
         if any(
-            field_name in self.model_fields_set
-            and getattr(self, field_name) is None
+            field_name in self.model_fields_set and getattr(self, field_name) is None
             for field_name in required_fields
         ):
             raise ValueError(UPDATE_FIELDS_CANNOT_BE_NULL)

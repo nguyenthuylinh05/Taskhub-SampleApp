@@ -1,4 +1,4 @@
-﻿"""Business logic for task operations."""
+"""Business logic for task operations."""
 
 from app.core.exceptions import (
     InvalidOperation,
@@ -17,9 +17,9 @@ from app.models.enums import (
     ProjectStatus,
     TaskPriority,
     TaskStatus,
-    WorkspaceRole,
 )
 from app.models.project import Project
+from app.models.task import Task
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.repositories.project import ProjectRepository
@@ -28,7 +28,10 @@ from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.pagination import Pagination
 from app.schemas.task import TaskCreate, TaskListResponse, TaskResponse, TaskUpdate
-from app.services.workspace_access import resolve_workspace_access
+from app.services.workspace_access import (
+    has_workspace_write_access,
+    resolve_workspace_access,
+)
 
 
 class TaskService:
@@ -59,16 +62,16 @@ class TaskService:
         if project is None:
             raise NotFoundException(PROJECT_NOT_FOUND)
 
-        access = await resolve_workspace_access(
-            project.workspace_id,
-            current_user,
-            self.workspace_repository,
-        )
+        try:
+            access = await resolve_workspace_access(
+                project.workspace_id,
+                current_user,
+                self.workspace_repository,
+            )
+        except NotFoundException:
+            raise NotFoundException(PROJECT_NOT_FOUND) from None
 
-        if require_editor and access.role not in (
-            WorkspaceRole.OWNER,
-            WorkspaceRole.EDITOR,
-        ):
+        if require_editor and not has_workspace_write_access(access.role):
             raise PermissionDenied()
 
         return project, access.workspace
@@ -104,8 +107,23 @@ class TaskService:
         if role is None:
             raise InvalidOperation(TASK_ASSIGNEE_NOT_IN_WORKSPACE)
 
-        if role not in (WorkspaceRole.OWNER, WorkspaceRole.EDITOR):
+        if not has_workspace_write_access(role):
             raise InvalidOperation(TASK_ASSIGNEE_MUST_HAVE_WRITE_ACCESS)
+
+    async def _get_task_project_and_workspace(
+        self,
+        task: Task,
+        current_user: User,
+    ) -> tuple[Project, Workspace]:
+        """Resolve a task's project without revealing cross-workspace IDs."""
+        try:
+            return await self._get_project_and_workspace(
+                task.project_id,
+                current_user,
+                require_editor=True,
+            )
+        except NotFoundException:
+            raise NotFoundException(TASK_NOT_FOUND) from None
 
     async def create_task(
         self,
@@ -157,10 +175,7 @@ class TaskService:
         )
 
         return TaskListResponse(
-            items=[
-                TaskResponse.model_validate(task)
-                for task in tasks
-            ],
+            items=[TaskResponse.model_validate(task) for task in tasks],
             total=total,
             page=pagination.page,
             limit=pagination.limit,
@@ -179,19 +194,15 @@ class TaskService:
         if task is None:
             raise NotFoundException(TASK_NOT_FOUND)
 
-        project, workspace = await self._get_project_and_workspace(
-            task.project_id,
+        project, workspace = await self._get_task_project_and_workspace(
+            task,
             current_user,
-            require_editor=True,
         )
         self._ensure_project_active(project)
 
         update_data = data.model_dump(exclude_unset=True)
 
-        if (
-            "assignee_id" in update_data
-            and update_data["assignee_id"] is not None
-        ):
+        if "assignee_id" in update_data and update_data["assignee_id"] is not None:
             await self._validate_assignee(
                 workspace,
                 update_data["assignee_id"],
@@ -216,10 +227,9 @@ class TaskService:
         if task is None:
             raise NotFoundException(TASK_NOT_FOUND)
 
-        project, _ = await self._get_project_and_workspace(
-            task.project_id,
+        project, _ = await self._get_task_project_and_workspace(
+            task,
             current_user,
-            require_editor=True,
         )
         self._ensure_project_active(project)
 
