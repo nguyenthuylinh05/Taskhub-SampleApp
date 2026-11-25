@@ -1,9 +1,9 @@
-﻿"""Application configuration settings."""
+"""Application configuration settings."""
 
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
@@ -24,6 +24,21 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
+    LOG_LEVEL: Literal[
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL",
+    ] = "INFO"
+
+    @field_validator("LOG_LEVEL", mode="before")
+    @classmethod
+    def normalize_log_level(cls, value: object) -> object:
+        """Normalize log levels before validating the supported values."""
+        if isinstance(value, str):
+            return value.upper()
+        return value
 
     # PostgreSQL
     POSTGRES_DB: str = "taskhub_db"
@@ -51,9 +66,7 @@ class Settings(BaseSettings):
             raise ValueError("DEBUG must be disabled in production")
 
         if len(self.JWT_SECRET_KEY.get_secret_value()) < 32:
-            raise ValueError(
-                "JWT_SECRET_KEY must contain at least 32 characters"
-            )
+            raise ValueError("JWT_SECRET_KEY must contain at least 32 characters")
 
         return self
 

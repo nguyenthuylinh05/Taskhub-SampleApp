@@ -458,9 +458,43 @@ Examples of application-level errors include:
 
 ---
 
+## Request Logging
+
+TaskHub uses a Pure ASGI middleware to record request path, response status,
+processing time, and request ID. The middleware reuses a valid `X-Request-ID`
+header or generates a safe ID, then returns it in the response header.
+
+Application log records expose the active request ID as a `request_id` field.
+`LOG_LEVEL` sets the `app` and `taskhub` namespace logger levels and
+Taskhub-owned handler levels; descendant loggers that inherit those levels
+follow that setting. `2xx` and `3xx` responses are logged at `INFO`, `4xx` at
+`WARNING`, and `5xx` at `ERROR`.
+
+The root logger is set to `WARNING`, but Python does not reapply ancestor logger
+levels to records propagated from child loggers. A third-party child logger
+explicitly set to `DEBUG` or `INFO` can therefore reach a host root handler if
+that handler's level and filters accept it. Existing host root handlers are
+left unchanged, so Taskhub cannot guarantee suppression of all third-party
+`DEBUG`/`INFO` records while preserving host logging configuration. Hosts
+control those records through their logger levels and handler policies.
+Taskhub keeps Uvicorn error logs at `WARNING` or higher.
+
+Query strings, authorization headers, and exception details are excluded from
+Taskhub request-summary logs. Starlette re-raises unhandled exceptions after
+the safe 500 response, so the ASGI server may log exception details and a
+traceback. Do not put secrets in exception messages; manage server error-log
+retention and redaction separately.
+
+Logging configuration and Uvicorn access-log suppression run during application
+lifespan startup. Taskhub requires ASGI lifespan; `lifespan=off` is not a
+supported deployment mode. If an operator overrides this, configure logging
+externally and use Uvicorn's `--no-access-log` option to avoid duplicate logs.
+
+---
+
 ## Testing
 
-The project uses Pytest and HTTPX to test API endpoints, business logic, repositories, authorization, and integrations.
+The project uses Pytest and HTTPX to test API endpoints, business logic, repositories, authorization, middleware, and integrations.
 
 Run the complete test suite:
 
@@ -506,6 +540,7 @@ The test suite includes:
 | `test_projects.py` | Project CRUD and workspace-level authorization |
 | `test_repositories.py` | Repository operations |
 | `test_redis_integration.py` | Redis integration, refresh-token rotation, reuse detection, and revocation |
+| `test_middleware.py` | Request logging, status-based log levels, request IDs, and sensitive information protection |
 
 ### Redis Integration Tests
 
