@@ -17,6 +17,8 @@ from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.pagination import Pagination
 from app.services.auth import AuthService
+from app.services.comment import CommentService
+from app.services.label import LabelService
 from app.services.project import ProjectService
 from app.services.task import TaskService
 from app.services.user import UserService
@@ -196,6 +198,28 @@ LabelRepositoryDep = Annotated[
 ]
 
 
+def get_label_service(
+    label_repository: LabelRepositoryDep,
+    project_repository: ProjectRepositoryDep,
+    task_repository: TaskRepositoryDep,
+    workspace_repository: WorkspaceRepositoryDep,
+) -> LabelService:
+    """Create label service with injected repositories."""
+
+    return LabelService(
+        label_repository=label_repository,
+        project_repository=project_repository,
+        task_repository=task_repository,
+        workspace_repository=workspace_repository,
+    )
+
+
+LabelServiceDep = Annotated[
+    LabelService,
+    Depends(get_label_service),
+]
+
+
 def get_comment_repository(
     session: DatabaseSessionDep,
 ) -> CommentRepository:
@@ -207,4 +231,26 @@ def get_comment_repository(
 CommentRepositoryDep = Annotated[
     CommentRepository,
     Depends(get_comment_repository),
+]
+
+
+def get_comment_service(
+    comment_repository: CommentRepositoryDep,
+    task_repository: TaskRepositoryDep,
+    project_repository: ProjectRepositoryDep,
+    workspace_repository: WorkspaceRepositoryDep,
+) -> CommentService:
+    """Create comment service with injected repositories."""
+
+    return CommentService(
+        comment_repository=comment_repository,
+        task_repository=task_repository,
+        project_repository=project_repository,
+        workspace_repository=workspace_repository,
+    )
+
+
+CommentServiceDep = Annotated[
+    CommentService,
+    Depends(get_comment_service),
 ]

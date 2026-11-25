@@ -428,6 +428,31 @@ Base path:
 
 For request and response schemas, see the Swagger UI at `/docs`.
 
+### Labels and Comments
+
+Labels belong to a project. Task-label assignment is limited to tasks in the
+same project. Comment authors are taken from the authenticated user, and
+clients cannot supply `author_id` or `created_at`.
+
+| Method | Endpoint | Description | Required Access |
+|---|---|---|---|
+| POST | `/projects/{project_id}/labels` | Create a project label | Owner / Editor |
+| GET | `/projects/{project_id}/labels` | List project labels | Member |
+| GET | `/labels/{label_id}` | Get a label | Member |
+| PATCH | `/labels/{label_id}` | Update a label | Owner / Editor |
+| DELETE | `/labels/{label_id}` | Delete a label | Owner / Editor |
+| POST | `/tasks/{task_id}/labels/{label_id}` | Assign a label to a task | Owner / Editor |
+| DELETE | `/tasks/{task_id}/labels/{label_id}` | Remove a label from a task | Owner / Editor |
+| POST | `/tasks/{task_id}/comments` | Add a task comment | Owner / Editor |
+| GET | `/tasks/{task_id}/comments` | List task comments | Member |
+| DELETE | `/comments/{comment_id}` | Delete a task comment | Owner / Editor |
+
+System administrators receive owner-level access through the existing
+workspace authorization policy. Viewers can read accessible labels and
+comments but cannot create, update, assign, remove, or delete them. Comment
+deletion follows the existing role-based Task deletion policy; authorship does
+not grant a separate deletion permission.
+
 ---
 
 ## Error Handling
@@ -538,6 +563,8 @@ The test suite includes:
 | `test_users.py` | User profile, administration, pagination, and user deletion behavior |
 | `test_workspaces.py` | Workspace CRUD, membership, role permissions, pagination, and deletion behavior |
 | `test_projects.py` | Project CRUD and workspace-level authorization |
+| `test_labels.py` | Label CRUD, task associations, project boundaries, and role permissions |
+| `test_comments.py` | Comment creation, listing, validation, authorship, deletion, and role permissions |
 | `test_repositories.py` | Repository operations |
 | `test_redis_integration.py` | Redis integration, refresh-token rotation, reuse detection, and revocation |
 | `test_middleware.py` | Request logging, status-based log levels, request IDs, and sensitive information protection |
@@ -590,6 +617,7 @@ The project is developed incrementally according to the FastAPI module curriculu
 | Day 2 | SQLAlchemy 2.x Async & Alembic | Completed |
 | Day 3 | Authentication & Security | Completed |
 | Day 4 | Authorization & RBAC | Completed |
+| Day 6 | Label & Comment Management | Completed |
 
 ### Day 4 Verification
 
