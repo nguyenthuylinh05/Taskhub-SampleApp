@@ -99,7 +99,7 @@ async def update_task(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a task",
     responses={
-        400: {"description": "Cannot modify tasks in an archived project"},
+        400: {"description": "Cannot modify resources in an archived project"},
         401: {"description": "Not authenticated"},
         403: {"description": "Insufficient workspace permissions"},
         404: {"description": "Task, project, or workspace not found"},

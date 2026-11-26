@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
+from app.core.messages import PROJECT_ARCHIVED
 from fastapi.testclient import TestClient
 
 
@@ -873,9 +874,7 @@ def test_cannot_create_task_in_archived_project(
     )
 
     assert create_response.status_code == 400
-    assert create_response.json()["detail"] == (
-        "Cannot modify tasks in an archived project"
-    )
+    assert create_response.json()["detail"] == PROJECT_ARCHIVED
 
 
 def test_cannot_update_task_in_archived_project(
@@ -913,9 +912,7 @@ def test_cannot_update_task_in_archived_project(
     )
 
     assert update_response.status_code == 400
-    assert update_response.json()["detail"] == (
-        "Cannot modify tasks in an archived project"
-    )
+    assert update_response.json()["detail"] == PROJECT_ARCHIVED
 
 
 def test_cannot_delete_task_in_archived_project(
@@ -952,9 +949,7 @@ def test_cannot_delete_task_in_archived_project(
     )
 
     assert delete_response.status_code == 400
-    assert delete_response.json()["detail"] == (
-        "Cannot modify tasks in an archived project"
-    )
+    assert delete_response.json()["detail"] == PROJECT_ARCHIVED
 
 
 def test_can_list_tasks_in_archived_project(

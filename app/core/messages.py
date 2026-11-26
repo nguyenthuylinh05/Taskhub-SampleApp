@@ -2,11 +2,21 @@
 
 # Project
 PROJECT_NOT_FOUND = "Project not found"
+PROJECT_ARCHIVED = "Cannot modify resources in an archived project"
 
 # Repository
 CANNOT_DELETE_REFERENCED_RESOURCE = (
     "Cannot delete this resource because it is referenced by other records"
 )
+
+# Label
+LABEL_NOT_FOUND = "Label not found"
+LABEL_NOT_ASSIGNED = "Label is not assigned to this task"
+LABEL_NAME_ALREADY_EXISTS = "Label name already exists in this project"
+LABEL_ALREADY_ASSIGNED = "Label is already assigned to this task"
+
+# Comment
+COMMENT_NOT_FOUND = "Comment not found"
 
 # User
 USER_NOT_FOUND = "User not found"
@@ -39,4 +49,3 @@ TASK_DUE_DATE_MUST_BE_FUTURE = "Due date must be in the future"
 TASK_ASSIGNEE_MUST_HAVE_WRITE_ACCESS = (
     "Task assignee must be a workspace owner or editor"
 )
-PROJECT_ARCHIVED = "Cannot modify tasks in an archived project"

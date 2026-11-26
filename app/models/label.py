@@ -1,8 +1,9 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Table
+from sqlalchemy import Column, ForeignKey, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.constants import LABEL_PROJECT_NAME_CONSTRAINT
 from app.models.base import Base
 
 if TYPE_CHECKING:
@@ -33,6 +34,13 @@ class Label(Base):
     """Label model."""
 
     __tablename__ = "labels"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "name",
+            name=LABEL_PROJECT_NAME_CONSTRAINT,
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer,

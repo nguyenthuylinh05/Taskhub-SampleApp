@@ -1,9 +1,10 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Label, task_labels
 from app.repositories.base import BaseRepository
+from app.schemas.pagination import Pagination
 
 
 class LabelRepository(BaseRepository[Label]):
@@ -12,24 +13,28 @@ class LabelRepository(BaseRepository[Label]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, Label)
 
-    async def get_by_project(self, project_id: int) -> list[Label]:
+    async def get_by_project(
+        self,
+        project_id: int,
+        pagination: Pagination,
+    ) -> tuple[list[Label], int]:
         """List labels in a project in stable ID order."""
 
+        conditions = [Label.project_id == project_id]
+        total = (
+            await self.session.scalar(
+                select(func.count()).select_from(Label).where(*conditions)
+            )
+            or 0
+        )
         result = await self.session.scalars(
             select(Label)
-            .where(Label.project_id == project_id)
+            .where(*conditions)
             .order_by(Label.id)
+            .offset((pagination.page - 1) * pagination.limit)
+            .limit(pagination.limit)
         )
-        return list(result.all())
-
-    async def is_assigned(self, task_id: int, label_id: int) -> bool:
-        """Check whether the task-label association already exists."""
-
-        statement = select(task_labels.c.task_id).where(
-            task_labels.c.task_id == task_id,
-            task_labels.c.label_id == label_id,
-        )
-        return await self.session.scalar(statement) is not None
+        return list(result.all()), total
 
     async def assign_to_task(self, task_id: int, label_id: int) -> bool:
         """Insert an association unless another request already inserted it."""

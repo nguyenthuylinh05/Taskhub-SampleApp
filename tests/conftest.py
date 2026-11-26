@@ -108,6 +108,30 @@ def create_test_project(
 
 
 @pytest.fixture
+def create_test_task(
+    client: TestClient,
+) -> Callable[[dict[str, str], int, str], int]:
+    """Create a task through the public API."""
+
+    def _create_test_task(
+        headers: dict[str, str],
+        project_id: int,
+        title: str,
+    ) -> int:
+        response = client.post(
+            f"/api/v1/projects/{project_id}/tasks",
+            headers=headers,
+            json={"title": title},
+        )
+        assert response.status_code == 201
+        task_id = response.json()["id"]
+        assert isinstance(task_id, int)
+        return task_id
+
+    return _create_test_task
+
+
+@pytest.fixture
 def add_workspace_member(
     client: TestClient,
 ) -> Callable[[dict[str, str], int, int, str], None]:

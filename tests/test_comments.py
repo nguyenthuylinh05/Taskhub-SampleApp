@@ -2,23 +2,12 @@
 
 from collections.abc import Callable
 
+import pytest
+from app.core.constants import COMMENT_CONTENT_MAX_LENGTH
+from app.core.messages import PROJECT_ARCHIVED
+from app.schemas.comment import CommentCreate
 from fastapi.testclient import TestClient
-
-
-def create_task(
-    client: TestClient,
-    headers: dict[str, str],
-    project_id: int,
-) -> int:
-    response = client.post(
-        f"/api/v1/projects/{project_id}/tasks",
-        headers=headers,
-        json={"title": "Comment test task"},
-    )
-    assert response.status_code == 201
-    task_id = response.json()["id"]
-    assert isinstance(task_id, int)
-    return task_id
+from pydantic import ValidationError
 
 
 def test_create_list_and_delete_comments(
@@ -26,11 +15,12 @@ def test_create_list_and_delete_comments(
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
     create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
 ) -> None:
     user_id, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
     project_id = create_test_project(headers, workspace_id)
-    task_id = create_task(client, headers, project_id)
+    task_id = create_test_task(headers, project_id, "Comment test task")
     comments_url = f"/api/v1/tasks/{task_id}/comments"
 
     created = client.post(
@@ -48,14 +38,19 @@ def test_create_list_and_delete_comments(
 
     listed = client.get(comments_url, headers=headers)
     assert listed.status_code == 200
-    assert [item["id"] for item in listed.json()] == [comment_id]
+    assert [item["id"] for item in listed.json()["items"]] == [comment_id]
+    assert listed.json()["total"] == 1
+    assert listed.json()["page"] == 1
+    assert listed.json()["limit"] == 10
 
     deleted = client.delete(
         f"/api/v1/comments/{comment_id}",
         headers=headers,
     )
     assert deleted.status_code == 204
-    assert client.get(comments_url, headers=headers).json() == []
+    empty = client.get(comments_url, headers=headers)
+    assert empty.json()["items"] == []
+    assert empty.json()["total"] == 0
 
 
 def test_comment_content_and_protected_fields_validation(
@@ -63,12 +58,27 @@ def test_comment_content_and_protected_fields_validation(
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
     create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
 ) -> None:
     user_id, headers = register_and_login()
     workspace_id = create_test_workspace(headers)
     project_id = create_test_project(headers, workspace_id)
-    task_id = create_task(client, headers, project_id)
+    task_id = create_test_task(headers, project_id, "Comment validation task")
     comments_url = f"/api/v1/tasks/{task_id}/comments"
+
+    at_limit = client.post(
+        comments_url,
+        headers=headers,
+        json={"content": "x" * COMMENT_CONTENT_MAX_LENGTH},
+    )
+    assert at_limit.status_code == 201
+
+    over_limit = client.post(
+        comments_url,
+        headers=headers,
+        json={"content": "x" * (COMMENT_CONTENT_MAX_LENGTH + 1)},
+    )
+    assert over_limit.status_code == 422
 
     empty = client.post(comments_url, headers=headers, json={"content": ""})
     assert empty.status_code == 422
@@ -96,30 +106,43 @@ def test_comments_reject_missing_and_inaccessible_resources(
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
     create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
 ) -> None:
     _, owner_headers = register_and_login()
     _, outsider_headers = register_and_login()
     workspace_id = create_test_workspace(owner_headers)
     project_id = create_test_project(owner_headers, workspace_id)
-    task_id = create_task(client, owner_headers, project_id)
+    task_id = create_test_task(owner_headers, project_id, "Missing resource task")
 
-    assert client.post(
-        "/api/v1/tasks/999999/comments",
-        headers=owner_headers,
-        json={"content": "Missing task"},
-    ).status_code == 404
-    assert client.get(
-        "/api/v1/tasks/999999/comments",
-        headers=owner_headers,
-    ).status_code == 404
-    assert client.delete(
-        "/api/v1/comments/999999",
-        headers=owner_headers,
-    ).status_code == 404
-    assert client.get(
-        f"/api/v1/tasks/{task_id}/comments",
-        headers=outsider_headers,
-    ).status_code == 404
+    assert (
+        client.post(
+            "/api/v1/tasks/999999/comments",
+            headers=owner_headers,
+            json={"content": "Missing task"},
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/api/v1/tasks/999999/comments",
+            headers=owner_headers,
+        ).status_code
+        == 404
+    )
+    assert (
+        client.delete(
+            "/api/v1/comments/999999",
+            headers=owner_headers,
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/v1/tasks/{task_id}/comments",
+            headers=outsider_headers,
+        ).status_code
+        == 404
+    )
 
 
 def test_comment_writes_follow_workspace_roles(
@@ -127,6 +150,7 @@ def test_comment_writes_follow_workspace_roles(
     register_and_login: Callable[[], tuple[int, dict[str, str]]],
     create_test_workspace: Callable[[dict[str, str]], int],
     create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
     add_workspace_member: Callable[[dict[str, str], int, int, str], None],
     promote_to_admin: Callable[[int], None],
 ) -> None:
@@ -137,7 +161,7 @@ def test_comment_writes_follow_workspace_roles(
     promote_to_admin(admin_id)
     workspace_id = create_test_workspace(owner_headers)
     project_id = create_test_project(owner_headers, workspace_id)
-    task_id = create_task(client, owner_headers, project_id)
+    task_id = create_test_task(owner_headers, project_id, "Role policy task")
     add_workspace_member(
         owner_headers,
         workspace_id,
@@ -158,22 +182,31 @@ def test_comment_writes_follow_workspace_roles(
         json={"content": "Owner comment"},
     ).json()
     assert client.get(comments_url, headers=viewer_headers).status_code == 200
-    assert client.post(
-        comments_url,
-        headers=viewer_headers,
-        json={"content": "Viewer cannot comment"},
-    ).status_code == 403
-    assert client.delete(
-        f"/api/v1/comments/{owner_comment['id']}",
-        headers=viewer_headers,
-    ).status_code == 403
+    assert (
+        client.post(
+            comments_url,
+            headers=viewer_headers,
+            json={"content": "Viewer cannot comment"},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.delete(
+            f"/api/v1/comments/{owner_comment['id']}",
+            headers=viewer_headers,
+        ).status_code
+        == 403
+    )
 
     # Editors may delete even when they did not author the comment, matching
     # existing Task deletion policy, which is role-based rather than ownership-based.
-    assert client.delete(
-        f"/api/v1/comments/{owner_comment['id']}",
-        headers=editor_headers,
-    ).status_code == 204
+    assert (
+        client.delete(
+            f"/api/v1/comments/{owner_comment['id']}",
+            headers=editor_headers,
+        ).status_code
+        == 204
+    )
 
     admin_comment = client.post(
         comments_url,
@@ -181,7 +214,106 @@ def test_comment_writes_follow_workspace_roles(
         json={"content": "Admin comment"},
     )
     assert admin_comment.status_code == 201
-    assert client.delete(
-        f"/api/v1/comments/{admin_comment.json()['id']}",
-        headers=admin_headers,
-    ).status_code == 204
+    assert (
+        client.delete(
+            f"/api/v1/comments/{admin_comment.json()['id']}",
+            headers=admin_headers,
+        ).status_code
+        == 204
+    )
+
+
+def test_comment_pagination(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
+) -> None:
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    project_id = create_test_project(headers, workspace_id)
+    task_id = create_test_task(headers, project_id, "Pagination task")
+    comments_url = f"/api/v1/tasks/{task_id}/comments"
+
+    for content in ("First", "Second", "Third"):
+        response = client.post(
+            comments_url,
+            headers=headers,
+            json={"content": content},
+        )
+        assert response.status_code == 201
+
+    first_page = client.get(f"{comments_url}?page=1&limit=2", headers=headers)
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 3
+    assert first_page.json()["page"] == 1
+    assert first_page.json()["limit"] == 2
+    assert [item["content"] for item in first_page.json()["items"]] == [
+        "First",
+        "Second",
+    ]
+
+    second_page = client.get(f"{comments_url}?page=2&limit=2", headers=headers)
+    assert second_page.status_code == 200
+    assert second_page.json()["total"] == 3
+    assert [item["content"] for item in second_page.json()["items"]] == ["Third"]
+
+    empty_page = client.get(f"{comments_url}?page=3&limit=2", headers=headers)
+    assert empty_page.status_code == 200
+    assert empty_page.json()["items"] == []
+    assert empty_page.json()["total"] == 3
+
+    assert client.get(f"{comments_url}?limit=101", headers=headers).status_code == 422
+
+
+def test_archived_project_rejects_comment_writes(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
+) -> None:
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    project_id = create_test_project(headers, workspace_id)
+    task_id = create_test_task(headers, project_id, "Archived comment task")
+    comments_url = f"/api/v1/tasks/{task_id}/comments"
+    existing = client.post(
+        comments_url,
+        headers=headers,
+        json={"content": "Keep readable after archive"},
+    )
+    assert existing.status_code == 201
+    comment_id = existing.json()["id"]
+
+    archived = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/projects/{project_id}",
+        headers=headers,
+        json={"status": "ARCHIVED"},
+    )
+    assert archived.status_code == 200
+
+    create_response = client.post(
+        comments_url,
+        headers=headers,
+        json={"content": "Cannot create"},
+    )
+    delete_response = client.delete(
+        f"/api/v1/comments/{comment_id}",
+        headers=headers,
+    )
+    assert create_response.status_code == 400
+    assert create_response.json()["detail"] == PROJECT_ARCHIVED
+    assert delete_response.status_code == 400
+    assert delete_response.json()["detail"] == PROJECT_ARCHIVED
+
+    listed = client.get(comments_url, headers=headers)
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["items"]] == [comment_id]
+
+
+def test_comment_schema_enforces_content_max_length() -> None:
+    assert CommentCreate(content="x" * COMMENT_CONTENT_MAX_LENGTH)
+    with pytest.raises(ValidationError):
+        CommentCreate(content="x" * (COMMENT_CONTENT_MAX_LENGTH + 1))

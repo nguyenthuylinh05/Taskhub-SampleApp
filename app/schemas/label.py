@@ -2,15 +2,25 @@
 
 from pydantic import Field, model_validator
 
+from app.core.constants import (
+    LABEL_COLOR_PATTERN,
+    LABEL_NAME_MAX_LENGTH,
+    LABEL_NAME_MIN_LENGTH,
+)
+from app.core.messages import UPDATE_FIELDS_REQUIRED
 from app.schemas.base import BaseSchema
 
 
 class LabelCreate(BaseSchema):
     """Schema for creating a project label."""
 
-    name: str = Field(min_length=1, max_length=255, description="Label name")
+    name: str = Field(
+        min_length=LABEL_NAME_MIN_LENGTH,
+        max_length=LABEL_NAME_MAX_LENGTH,
+        description="Label name",
+    )
     color: str = Field(
-        pattern=r"^#[0-9A-Fa-f]{6}$",
+        pattern=LABEL_COLOR_PATTERN,
         description="Six-digit hexadecimal color, such as #3366CC",
     )
 
@@ -18,15 +28,19 @@ class LabelCreate(BaseSchema):
 class LabelUpdate(BaseSchema):
     """Schema for partially updating a label."""
 
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    name: str | None = Field(
+        default=None,
+        min_length=LABEL_NAME_MIN_LENGTH,
+        max_length=LABEL_NAME_MAX_LENGTH,
+    )
+    color: str | None = Field(default=None, pattern=LABEL_COLOR_PATTERN)
 
     @model_validator(mode="after")
     def validate_update(self) -> "LabelUpdate":
         """Require at least one non-null field."""
 
         if not self.model_fields_set:
-            raise ValueError("At least one field must be provided")
+            raise ValueError(UPDATE_FIELDS_REQUIRED)
         if any(getattr(self, field) is None for field in self.model_fields_set):
             raise ValueError("Label fields cannot be null")
         return self
@@ -39,3 +53,12 @@ class LabelResponse(BaseSchema):
     project_id: int
     name: str
     color: str
+
+
+class LabelListResponse(BaseSchema):
+    """Paginated project label list."""
+
+    items: list[LabelResponse]
+    total: int
+    page: int
+    limit: int

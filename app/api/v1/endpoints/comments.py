@@ -3,8 +3,12 @@
 from fastapi import APIRouter, Response, status
 
 from app.api.dependencies import CurrentUserDep
-from app.core.dependencies import CommentServiceDep
-from app.schemas.comment import CommentCreate, CommentResponse
+from app.core.dependencies import CommentServiceDep, PaginationDep
+from app.schemas.comment import (
+    CommentCreate,
+    CommentListResponse,
+    CommentResponse,
+)
 
 router = APIRouter(tags=["Comments"])
 
@@ -14,9 +18,7 @@ router = APIRouter(tags=["Comments"])
     response_model=CommentResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Add a comment to a task",
-    description=(
-        "Add a comment as the authenticated user. Requires OWNER or EDITOR."
-    ),
+    description=("Add a comment as the authenticated user. Requires OWNER or EDITOR."),
     responses={
         400: {"description": "Task belongs to an archived project"},
         401: {"description": "Not authenticated"},
@@ -36,7 +38,7 @@ async def create_comment(
 
 @router.get(
     "/tasks/{task_id}/comments",
-    response_model=list[CommentResponse],
+    response_model=CommentListResponse,
     summary="List comments for a task",
     description="List comments for a task in an accessible workspace.",
     responses={
@@ -48,17 +50,16 @@ async def get_comments(
     task_id: int,
     current_user: CurrentUserDep,
     service: CommentServiceDep,
-) -> list[CommentResponse]:
-    return await service.get_comments(task_id, current_user)
+    pagination: PaginationDep,
+) -> CommentListResponse:
+    return await service.get_comments(task_id, current_user, pagination)
 
 
 @router.delete(
     "/comments/{comment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a comment",
-    description=(
-        "Delete a comment. Requires OWNER or EDITOR access to its workspace."
-    ),
+    description=("Delete a comment. Requires OWNER or EDITOR access to its workspace."),
     responses={
         400: {"description": "Comment belongs to an archived project"},
         401: {"description": "Not authenticated"},

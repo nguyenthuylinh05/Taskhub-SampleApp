@@ -93,6 +93,20 @@ Examples include:
 
 Alembic is used to manage database schema changes.
 
+Before running an Alembic command, verify that `.env` points to the intended
+database. The application uses `POSTGRES_DB` (default `taskhub_db`); standalone
+Alembic commands use `TASKHUB_DATABASE_URL` if set, otherwise they use the
+application database URL. Pytest fixtures use the separate `POSTGRES_TEST_DB`
+(default `taskhub_test_db`) and run `alembic upgrade head` against it as part of
+the test workflow. The fixture does not create the database itself, and
+test-database migrations should not be run manually outside that workflow.
+
+PR7 adds
+`alembic/versions/05386ea537cb_add_unique_label_name_per_project.py`. It checks
+for duplicate project/label-name pairs before creating
+`uq_labels_project_id_name`. If duplicates exist, the migration stops and
+requires manual resolution; it does not delete or merge data.
+
 Create a migration:
 
 ```bash
@@ -111,6 +125,10 @@ Check the current migration:
 uv run alembic current
 ```
 
+For these standalone commands, confirm that the effective URL selects the
+intended development database before proceeding. Unless `TASKHUB_DATABASE_URL`
+is set, that database is selected by `POSTGRES_DB`.
+
 ---
 
 ## Project Structure
@@ -124,7 +142,10 @@ Taskhub-SampleApp/
 │   │   └── v1/
 │   │       ├── endpoints/
 │   │       │   ├── auth.py
+│   │       │   ├── comments.py
+│   │       │   ├── labels.py
 │   │       │   ├── projects.py
+│   │       │   ├── tasks.py
 │   │       │   ├── users.py
 │   │       │   └── workspaces.py
 │   │       └── router.py
@@ -137,9 +158,15 @@ Taskhub-SampleApp/
 │   │   ├── dependencies.py
 │   │   ├── exceptions.py
 │   │   ├── exception_handlers.py
+│   │   ├── logging.py
+│   │   ├── logging_context.py
 │   │   ├── messages.py
 │   │   ├── redis.py
 │   │   └── security.py
+│   │
+│   ├── middleware/
+│   │   ├── __init__.py
+│   │   └── request_logging.py
 │   │
 │   ├── models/
 │   │   ├── base.py
@@ -163,15 +190,23 @@ Taskhub-SampleApp/
 │   ├── schemas/
 │   │   ├── auth.py
 │   │   ├── base.py
+│   │   ├── comment.py
+│   │   ├── label.py
+│   │   ├── pagination.py
 │   │   ├── project.py
+│   │   ├── task.py
 │   │   ├── user.py
 │   │   └── workspace.py
 │   │
 │   ├── services/
 │   │   ├── auth.py
+│   │   ├── comment.py
+│   │   ├── label.py
 │   │   ├── project.py
+│   │   ├── task.py
 │   │   ├── user.py
-│   │   └── workspace.py
+│   │   ├── workspace.py
+│   │   └── workspace_access.py
 │   │
 │   └── main.py
 │
@@ -185,9 +220,15 @@ Taskhub-SampleApp/
 │   ├── test_admin_concurrency.py
 │   ├── test_auth.py
 │   ├── test_authorization.py
+│   ├── test_comments.py
+│   ├── test_exception_handlers.py
+│   ├── test_labels.py
+│   ├── test_logging.py
+│   ├── test_middleware.py
 │   ├── test_projects.py
 │   ├── test_redis_integration.py
 │   ├── test_repositories.py
+│   ├── test_tasks.py
 │   ├── test_users.py
 │   └── test_workspaces.py
 │
@@ -327,12 +368,14 @@ TaskHub implements authorization at both the system and workspace levels.
 | Role | Permissions |
 |---|---|
 | OWNER | Full workspace management, including membership management |
-| EDITOR | Can create and update workspace projects |
+| EDITOR | Can manage workspace projects, tasks, labels, and comments |
 | VIEWER | Can view workspace resources |
 
 The workspace owner has OWNER access without requiring a separate membership record.
 
-System administrators can access workspaces with administrative privileges.
+System ADMIN users are resolved as effective OWNERs for workspace access. In the
+endpoint tables, `Workspace access` means an authenticated OWNER, EDITOR, or
+VIEWER of that workspace, or a system ADMIN.
 
 ### Authorization Dependencies
 
@@ -353,11 +396,20 @@ The `WorkspaceAccess` data class contains the workspace and the user's effective
 
 ## API Endpoints
 
-All API endpoints are prefixed with:
+All endpoints use the `/api/v1` prefix.
 
-```text
-/api/v1
-```
+| Module | Main operations |
+|---|---|
+| Authentication | Register, login, refresh, logout |
+| Users | Current profile, password change, user administration |
+| Workspaces | Create, list, retrieve, update, delete |
+| Workspace Members | Add, list, remove members |
+| Projects | Create, list, retrieve, update, delete |
+| Tasks | Task CRUD, assignment, filtering, pagination |
+| Labels | Create, list, retrieve, update, delete, assign, remove |
+| Comments | Create, list, delete |
+
+See Swagger UI at `/docs` for request and response schemas.
 
 ### Authentication
 
@@ -396,7 +448,7 @@ These endpoints require the system ADMIN role.
 |---|---|---|---|
 | POST | `/workspaces` | Create a workspace | Authenticated |
 | GET | `/workspaces` | List accessible workspaces with pagination | Authenticated |
-| GET | `/workspaces/{workspace_id}` | Get workspace details | Member |
+| GET | `/workspaces/{workspace_id}` | Get workspace details | Workspace access |
 | PATCH | `/workspaces/{workspace_id}` | Update workspace | Owner / Editor |
 | DELETE | `/workspaces/{workspace_id}` | Delete workspace | Owner |
 
@@ -405,7 +457,7 @@ These endpoints require the system ADMIN role.
 | Method | Endpoint | Description | Required Access |
 |---|---|---|---|
 | POST | `/workspaces/{workspace_id}/members` | Add a workspace member | Owner |
-| GET | `/workspaces/{workspace_id}/members` | List workspace members | Member |
+| GET | `/workspaces/{workspace_id}/members` | List workspace members | Workspace access |
 | DELETE | `/workspaces/{workspace_id}/members/{user_id}` | Remove a workspace member | Owner |
 
 ### Projects
@@ -421,8 +473,8 @@ Base path:
 | Method | Endpoint | Description | Required Access |
 |---|---|---|---|
 | POST | `/workspaces/{workspace_id}/projects` | Create a project | Owner / Editor |
-| GET | `/workspaces/{workspace_id}/projects` | List workspace projects | Member |
-| GET | `/workspaces/{workspace_id}/projects/{project_id}` | Get project details | Member |
+| GET | `/workspaces/{workspace_id}/projects` | List workspace projects | Workspace access |
+| GET | `/workspaces/{workspace_id}/projects/{project_id}` | Get project details | Workspace access |
 | PATCH | `/workspaces/{workspace_id}/projects/{project_id}` | Update a project | Owner / Editor |
 | DELETE | `/workspaces/{workspace_id}/projects/{project_id}` | Delete a project | Owner / Editor |
 
@@ -437,14 +489,14 @@ clients cannot supply `author_id` or `created_at`.
 | Method | Endpoint | Description | Required Access |
 |---|---|---|---|
 | POST | `/projects/{project_id}/labels` | Create a project label | Owner / Editor |
-| GET | `/projects/{project_id}/labels` | List project labels | Member |
-| GET | `/labels/{label_id}` | Get a label | Member |
+| GET | `/projects/{project_id}/labels` | List project labels | Workspace access |
+| GET | `/labels/{label_id}` | Get a label | Workspace access |
 | PATCH | `/labels/{label_id}` | Update a label | Owner / Editor |
 | DELETE | `/labels/{label_id}` | Delete a label | Owner / Editor |
 | POST | `/tasks/{task_id}/labels/{label_id}` | Assign a label to a task | Owner / Editor |
 | DELETE | `/tasks/{task_id}/labels/{label_id}` | Remove a label from a task | Owner / Editor |
 | POST | `/tasks/{task_id}/comments` | Add a task comment | Owner / Editor |
-| GET | `/tasks/{task_id}/comments` | List task comments | Member |
+| GET | `/tasks/{task_id}/comments` | List task comments | Workspace access |
 | DELETE | `/comments/{comment_id}` | Delete a task comment | Owner / Editor |
 
 System administrators receive owner-level access through the existing
@@ -452,6 +504,55 @@ workspace authorization policy. Viewers can read accessible labels and
 comments but cannot create, update, assign, remove, or delete them. Comment
 deletion follows the existing role-based Task deletion policy; authorship does
 not grant a separate deletion permission.
+
+Labels are project-scoped. Names must be unique within a project; creating or
+renaming a label to a name already used in that project returns HTTP 409
+Conflict. The database enforces this with
+`uq_labels_project_id_name`. A label from a different project cannot be
+assigned to a task; the API returns the same 404 response used for a missing or
+inaccessible label. Removing a label association that does not exist also
+returns 404. Deleting a label resource is a separate operation.
+
+Comments can be created, listed, and deleted; there is no comment-edit endpoint.
+The authenticated user supplies the author identity, and request validation
+rejects client-supplied `author_id` or `created_at`. Comment content is limited
+to 5000 characters. OWNER and EDITOR users can create and delete comments;
+VIEWER users can read comments but cannot create or delete them. Deletion is
+workspace-role-based, not author-based: an OWNER or EDITOR may delete another
+user's comment.
+
+Label and comment writes are rejected for archived projects. This includes
+creating, updating, or deleting a label; assigning or removing a task-label
+association; and creating or deleting a comment. Reading and listing remain
+available subject to workspace access.
+
+The task, label, and comment services share workspace-access helpers. System
+ADMIN users receive effective OWNER-level access; workspace OWNERs have
+OWNER-level access, EDITORs can perform the supported writes, and VIEWERs are
+read-only. Reusable service error messages and validation/pagination constants
+are centralized in `app/core/messages.py` and `app/core/constants.py`.
+
+#### Label and Comment Pagination
+
+The label and comment list endpoints accept the `page` and `limit` query
+parameters. `page` must be at least 1; `limit` must be between 1 and 100. The
+defaults are `page=1` and `limit=10`. Both endpoints return this structure:
+
+```json
+{
+  "items": [],
+  "total": 0,
+  "page": 1,
+  "limit": 10
+}
+```
+
+For example:
+
+```text
+GET /api/v1/projects/{project_id}/labels?page=1&limit=10
+GET /api/v1/tasks/{task_id}/comments?page=1&limit=10
+```
 
 ---
 
@@ -527,6 +628,10 @@ Run the complete test suite:
 uv run pytest -v
 ```
 
+Database-backed pytest fixtures use `POSTGRES_TEST_DB` and run Alembic migrations
+against that database. Keep it separate from the development database selected
+by `POSTGRES_DB`.
+
 Run a specific test file:
 
 ```bash
@@ -560,14 +665,17 @@ The test suite includes:
 | `test_auth.py` | Registration, login, token validation, refresh, logout, and password-related behavior |
 | `test_authorization.py` | Authentication requirements and system/workspace role permissions |
 | `test_admin_concurrency.py` | Concurrent operations that protect the last active administrator |
+| `test_exception_handlers.py` | Application exception responses, status codes, and authentication headers |
+| `test_logging.py` | LOG_LEVEL validation, application logger levels, request IDs, handler preservation, and Uvicorn logging policy |
+| `test_middleware.py` | Request logging, status-based log levels, request IDs, cancellation, and sensitive information protection |
 | `test_users.py` | User profile, administration, pagination, and user deletion behavior |
 | `test_workspaces.py` | Workspace CRUD, membership, role permissions, pagination, and deletion behavior |
 | `test_projects.py` | Project CRUD and workspace-level authorization |
+| `test_tasks.py` | Task CRUD, workspace roles, assignment, validation, filters, pagination, and archived-project rules |
 | `test_labels.py` | Label CRUD, task associations, project boundaries, and role permissions |
-| `test_comments.py` | Comment creation, listing, validation, authorship, deletion, and role permissions |
+| `test_comments.py` | Comment creation, listing, validation, server-assigned authorship, deletion, and workspace-role permissions |
 | `test_repositories.py` | Repository operations |
 | `test_redis_integration.py` | Redis integration, refresh-token rotation, reuse detection, and revocation |
-| `test_middleware.py` | Request logging, status-based log levels, request IDs, and sensitive information protection |
 
 ### Redis Integration Tests
 
@@ -600,7 +708,7 @@ uv run ruff check .
 Run static type checking:
 
 ```bash
-uv run mypy app tests
+uv run mypy app
 ```
 
 Both tools are used to maintain code quality and catch potential issues before changes are submitted.
@@ -617,20 +725,23 @@ The project is developed incrementally according to the FastAPI module curriculu
 | Day 2 | SQLAlchemy 2.x Async & Alembic | Completed |
 | Day 3 | Authentication & Security | Completed |
 | Day 4 | Authorization & RBAC | Completed |
+| Day 5 | Task Management | Completed |
 | Day 6 | Label & Comment Management | Completed |
 
-### Day 4 Verification
 
-The Day 4 implementation and verification completed with the following results:
+### Day 6 Verification
+
+Latest reported Day 6 checks:
 
 | Check | Result |
 |---|---|
-| Full Pytest suite | 83 passed |
-| Ruff | All checks passed |
-| MyPy (`app`) | No issues found |
-| MyPy (`app tests`) | No issues found in 60 source files |
+| Full Pytest suite (`uv run pytest -q`) | 157 passed |
+| Ruff (`uv run ruff check .`) | All checks passed |
+| MyPy (`uv run mypy app`) | Success, no issues found in 65 source files |
+| `git diff --check` | Passed |
 
-Day 4 includes workspace-level authorization, role-based access control, workspace membership management, project permissions, pagination, and protection against removing the last active administrator.
+Day 6 implementation and testing are complete. PR #7 is awaiting final review
+and merge; it has not been merged. Day 7 and Day 8 have not started.
 
 ---
 

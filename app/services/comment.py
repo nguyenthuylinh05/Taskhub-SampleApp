@@ -1,15 +1,22 @@
 """Business logic for task comments."""
 
-from app.core.exceptions import InvalidOperation, NotFoundException, PermissionDenied
-from app.core.messages import PROJECT_ARCHIVED, TASK_NOT_FOUND
-from app.models import Project, User, WorkspaceRole
-from app.models.enums import ProjectStatus
+from app.core.exceptions import NotFoundException
+from app.core.messages import COMMENT_NOT_FOUND, PROJECT_NOT_FOUND, TASK_NOT_FOUND
+from app.models import Project, User
 from app.repositories.comment import CommentRepository
 from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.workspace import WorkspaceRepository
-from app.schemas.comment import CommentCreate, CommentResponse
-from app.services.workspace_access import resolve_workspace_access
+from app.schemas.comment import (
+    CommentCreate,
+    CommentListResponse,
+    CommentResponse,
+)
+from app.schemas.pagination import Pagination
+from app.services.workspace_access import (
+    ensure_project_active,
+    resolve_project_access,
+)
 
 
 class CommentService:
@@ -37,26 +44,15 @@ class CommentService:
         if task is None:
             raise NotFoundException(TASK_NOT_FOUND)
 
-        project = await self.project_repository.get_by_id(task.project_id)
-        if project is None:
-            raise NotFoundException("Project not found")
-
-        access = await resolve_workspace_access(
-            project.workspace_id,
+        project, _ = await resolve_project_access(
+            task.project_id,
             current_user,
+            self.project_repository,
             self.workspace_repository,
+            require_write=require_editor,
+            not_found_message=PROJECT_NOT_FOUND,
         )
-        if require_editor and access.role not in (
-            WorkspaceRole.OWNER,
-            WorkspaceRole.EDITOR,
-        ):
-            raise PermissionDenied()
         return task.id, project
-
-    @staticmethod
-    def _ensure_project_active(project: Project) -> None:
-        if project.status == ProjectStatus.ARCHIVED:
-            raise InvalidOperation(PROJECT_ARCHIVED)
 
     async def create_comment(
         self,
@@ -69,7 +65,7 @@ class CommentService:
             current_user,
             require_editor=True,
         )
-        self._ensure_project_active(project)
+        ensure_project_active(project)
         comment = await self.comment_repository.create(
             {
                 "task_id": authorized_task_id,
@@ -83,13 +79,22 @@ class CommentService:
         self,
         task_id: int,
         current_user: User,
-    ) -> list[CommentResponse]:
+        pagination: Pagination,
+    ) -> CommentListResponse:
         authorized_task_id, _ = await self._get_task_and_authorize(
             task_id,
             current_user,
         )
-        comments = await self.comment_repository.get_by_task(authorized_task_id)
-        return [CommentResponse.model_validate(item) for item in comments]
+        comments, total = await self.comment_repository.get_by_task(
+            authorized_task_id,
+            pagination,
+        )
+        return CommentListResponse(
+            items=[CommentResponse.model_validate(item) for item in comments],
+            total=total,
+            page=pagination.page,
+            limit=pagination.limit,
+        )
 
     async def delete_comment(
         self,
@@ -98,12 +103,12 @@ class CommentService:
     ) -> None:
         comment = await self.comment_repository.get_by_id(comment_id)
         if comment is None:
-            raise NotFoundException("Comment not found")
+            raise NotFoundException(COMMENT_NOT_FOUND)
 
         _, project = await self._get_task_and_authorize(
             comment.task_id,
             current_user,
             require_editor=True,
         )
-        self._ensure_project_active(project)
+        ensure_project_active(project)
         await self.comment_repository.delete_entity(comment)
