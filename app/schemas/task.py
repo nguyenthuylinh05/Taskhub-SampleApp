@@ -15,6 +15,7 @@ from app.core.messages import (
 )
 from app.models.enums import TaskPriority, TaskStatus
 from app.schemas.base import BaseSchema
+from app.schemas.label import LabelResponse
 
 
 def validate_future_due_date(value: AwareDatetime | None) -> AwareDatetime | None:
@@ -121,6 +122,7 @@ class TaskResponse(BaseSchema):
     due_date: datetime | None
     created_by: int
     created_at: datetime
+    labels: list[LabelResponse]
 
 
 class TaskListResponse(BaseSchema):

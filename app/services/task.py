@@ -47,6 +47,12 @@ class TaskService:
         self.workspace_repository = workspace_repository
         self.user_repository = user_repository
 
+    async def _get_task_response(self, task_id: int) -> TaskResponse:
+        task = await self.task_repository.get_by_id_with_labels(task_id)
+        if task is None:
+            raise NotFoundException(TASK_NOT_FOUND)
+        return TaskResponse.model_validate(task)
+
     async def _get_project_and_workspace(
         self,
         project_id: int,
@@ -133,7 +139,7 @@ class TaskService:
             }
         )
 
-        return TaskResponse.model_validate(task)
+        return await self._get_task_response(task.id)
 
     async def get_tasks(
         self,
@@ -195,7 +201,7 @@ class TaskService:
             update_data,
         )
 
-        return TaskResponse.model_validate(updated_task)
+        return await self._get_task_response(updated_task.id)
 
     async def delete_task(
         self,

@@ -1,8 +1,9 @@
 """Business logic for task comments."""
 
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import NotFoundException, PermissionDenied
 from app.core.messages import COMMENT_NOT_FOUND, PROJECT_NOT_FOUND, TASK_NOT_FOUND
 from app.models import Project, User
+from app.models.enums import WorkspaceRole
 from app.repositories.comment import CommentRepository
 from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
@@ -14,6 +15,7 @@ from app.schemas.comment import (
 )
 from app.schemas.pagination import Pagination
 from app.services.workspace_access import (
+    WorkspaceAccess,
     ensure_project_active,
     resolve_project_access,
 )
@@ -39,12 +41,12 @@ class CommentService:
         task_id: int,
         current_user: User,
         require_editor: bool = False,
-    ) -> tuple[int, Project]:
+    ) -> tuple[int, Project, WorkspaceAccess]:
         task = await self.task_repository.get_by_id(task_id)
         if task is None:
             raise NotFoundException(TASK_NOT_FOUND)
 
-        project, _ = await resolve_project_access(
+        project, access = await resolve_project_access(
             task.project_id,
             current_user,
             self.project_repository,
@@ -52,7 +54,7 @@ class CommentService:
             require_write=require_editor,
             not_found_message=PROJECT_NOT_FOUND,
         )
-        return task.id, project
+        return task.id, project, access
 
     async def create_comment(
         self,
@@ -60,7 +62,7 @@ class CommentService:
         data: CommentCreate,
         current_user: User,
     ) -> CommentResponse:
-        authorized_task_id, project = await self._get_task_and_authorize(
+        authorized_task_id, project, _ = await self._get_task_and_authorize(
             task_id,
             current_user,
             require_editor=True,
@@ -81,7 +83,7 @@ class CommentService:
         current_user: User,
         pagination: Pagination,
     ) -> CommentListResponse:
-        authorized_task_id, _ = await self._get_task_and_authorize(
+        authorized_task_id, _, _ = await self._get_task_and_authorize(
             task_id,
             current_user,
         )
@@ -105,10 +107,14 @@ class CommentService:
         if comment is None:
             raise NotFoundException(COMMENT_NOT_FOUND)
 
-        _, project = await self._get_task_and_authorize(
+        _, project, access = await self._get_task_and_authorize(
             comment.task_id,
             current_user,
-            require_editor=True,
         )
+        if (
+            comment.author_id != current_user.id
+            and access.role != WorkspaceRole.OWNER
+        ):
+            raise PermissionDenied()
         ensure_project_active(project)
         await self.comment_repository.delete_entity(comment)

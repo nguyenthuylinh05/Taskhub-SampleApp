@@ -53,6 +53,103 @@ def test_create_and_list_tasks(
     assert tasks["items"][0]["id"] == task["id"]
 
 
+def test_task_responses_include_assigned_labels(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+) -> None:
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    project_id = create_test_project(headers, workspace_id)
+    tasks_url = f"/api/v1/projects/{project_id}/tasks"
+
+    first_task_response = client.post(
+        tasks_url,
+        headers=headers,
+        json={"title": "Task with labels"},
+    )
+    second_task_response = client.post(
+        tasks_url,
+        headers=headers,
+        json={"title": "Task without labels"},
+    )
+    assert first_task_response.status_code == 201
+    assert second_task_response.status_code == 201
+    first_task_id = first_task_response.json()["id"]
+    second_task_id = second_task_response.json()["id"]
+    assert first_task_response.json()["labels"] == []
+    assert second_task_response.json()["labels"] == []
+
+    first_label_response = client.post(
+        f"/api/v1/projects/{project_id}/labels",
+        headers=headers,
+        json={"name": "Urgent", "color": "#FF3300"},
+    )
+    second_label_response = client.post(
+        f"/api/v1/projects/{project_id}/labels",
+        headers=headers,
+        json={"name": "Backend", "color": "#3366CC"},
+    )
+    assert first_label_response.status_code == 201
+    assert second_label_response.status_code == 201
+    first_label = first_label_response.json()
+    second_label = second_label_response.json()
+
+    first_assignment = client.post(
+        f"/api/v1/tasks/{first_task_id}/labels/{first_label['id']}",
+        headers=headers,
+    )
+    assert first_assignment.status_code == 204
+
+    one_label_update = client.patch(
+        f"/api/v1/tasks/{first_task_id}",
+        headers=headers,
+        json={"description": "One assigned label"},
+    )
+    assert one_label_update.status_code == 200
+    assert one_label_update.json()["labels"] == [
+        {
+            "id": first_label["id"],
+            "project_id": project_id,
+            "name": first_label["name"],
+            "color": first_label["color"],
+        }
+    ]
+
+    second_assignment = client.post(
+        f"/api/v1/tasks/{first_task_id}/labels/{second_label['id']}",
+        headers=headers,
+    )
+    assert second_assignment.status_code == 204
+    multiple_labels_update = client.patch(
+        f"/api/v1/tasks/{first_task_id}",
+        headers=headers,
+        json={"description": "Two assigned labels"},
+    )
+    assert multiple_labels_update.status_code == 200
+    assert {
+        (label["id"], label["name"], label["color"])
+        for label in multiple_labels_update.json()["labels"]
+    } == {
+        (first_label["id"], first_label["name"], first_label["color"]),
+        (second_label["id"], second_label["name"], second_label["color"]),
+    }
+
+    listed = client.get(tasks_url, headers=headers)
+    assert listed.status_code == 200
+    tasks_by_id = {task["id"]: task for task in listed.json()["items"]}
+    assert listed.json()["total"] == 2
+    assert {
+        (label["id"], label["name"], label["color"])
+        for label in tasks_by_id[first_task_id]["labels"]
+    } == {
+        (first_label["id"], first_label["name"], first_label["color"]),
+        (second_label["id"], second_label["name"], second_label["color"]),
+    }
+    assert tasks_by_id[second_task_id]["labels"] == []
+
+
 def test_update_task_and_assign_workspace_member(
     client: TestClient,
     register_and_login: Callable[[], tuple[int, dict[str, str]]],

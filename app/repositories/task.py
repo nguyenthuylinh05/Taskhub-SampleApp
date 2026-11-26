@@ -2,6 +2,7 @@
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import Project, Task
 from app.models.enums import TaskPriority, TaskStatus
@@ -14,6 +15,17 @@ class TaskRepository(BaseRepository[Task]):
 
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, Task)
+
+    async def get_by_id_with_labels(self, task_id: int) -> Task | None:
+        """Get a task and eagerly load its assigned labels."""
+
+        statement = (
+            select(Task)
+            .options(selectinload(Task.labels))
+            .where(Task.id == task_id)
+        )
+        result = await self.session.scalars(statement)
+        return result.one_or_none()
 
     async def get_filtered_by_project(
         self,
@@ -42,6 +54,7 @@ class TaskRepository(BaseRepository[Task]):
         statement = (
             select(Task)
             .where(*conditions)
+            .options(selectinload(Task.labels))
             .order_by(Task.id)
             .offset((pagination.page - 1) * pagination.limit)
             .limit(pagination.limit)

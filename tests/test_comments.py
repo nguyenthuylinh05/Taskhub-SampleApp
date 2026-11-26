@@ -4,7 +4,8 @@ from collections.abc import Callable
 
 import pytest
 from app.core.constants import COMMENT_CONTENT_MAX_LENGTH
-from app.core.messages import PROJECT_ARCHIVED
+from app.core.messages import COMMENT_NOT_FOUND, PROJECT_ARCHIVED
+from app.models.enums import WorkspaceRole
 from app.schemas.comment import CommentCreate
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -129,13 +130,12 @@ def test_comments_reject_missing_and_inaccessible_resources(
         ).status_code
         == 404
     )
-    assert (
-        client.delete(
-            "/api/v1/comments/999999",
-            headers=owner_headers,
-        ).status_code
-        == 404
+    missing_comment = client.delete(
+        "/api/v1/comments/999999",
+        headers=owner_headers,
     )
+    assert missing_comment.status_code == 404
+    assert missing_comment.json()["detail"] == COMMENT_NOT_FOUND
     assert (
         client.get(
             f"/api/v1/tasks/{task_id}/comments",
@@ -152,12 +152,14 @@ def test_comment_writes_follow_workspace_roles(
     create_test_project: Callable[[dict[str, str], int], int],
     create_test_task: Callable[[dict[str, str], int, str], int],
     add_workspace_member: Callable[[dict[str, str], int, int, str], None],
+    set_workspace_member_role: Callable[[int, int, WorkspaceRole], None],
     promote_to_admin: Callable[[int], None],
 ) -> None:
     _, owner_headers = register_and_login()
     editor_id, editor_headers = register_and_login()
     viewer_id, viewer_headers = register_and_login()
     admin_id, admin_headers = register_and_login()
+    _, outsider_headers = register_and_login()
     promote_to_admin(admin_id)
     workspace_id = create_test_workspace(owner_headers)
     project_id = create_test_project(owner_headers, workspace_id)
@@ -176,11 +178,13 @@ def test_comment_writes_follow_workspace_roles(
     )
     comments_url = f"/api/v1/tasks/{task_id}/comments"
 
-    owner_comment = client.post(
+    owner_comment_response = client.post(
         comments_url,
         headers=owner_headers,
         json={"content": "Owner comment"},
-    ).json()
+    )
+    assert owner_comment_response.status_code == 201
+    owner_comment_id = owner_comment_response.json()["id"]
     assert client.get(comments_url, headers=viewer_headers).status_code == 200
     assert (
         client.post(
@@ -192,35 +196,84 @@ def test_comment_writes_follow_workspace_roles(
     )
     assert (
         client.delete(
-            f"/api/v1/comments/{owner_comment['id']}",
+            f"/api/v1/comments/{owner_comment_id}",
             headers=viewer_headers,
         ).status_code
         == 403
     )
-
-    # Editors may delete even when they did not author the comment, matching
-    # existing Task deletion policy, which is role-based rather than ownership-based.
     assert (
         client.delete(
-            f"/api/v1/comments/{owner_comment['id']}",
+            f"/api/v1/comments/{owner_comment_id}",
+            headers=editor_headers,
+        ).status_code
+        == 403
+    )
+    assert (
+        client.delete(
+            f"/api/v1/comments/{owner_comment_id}",
+            headers=outsider_headers,
+        ).status_code
+        == 404
+    )
+
+    editor_own_comment = client.post(
+        comments_url,
+        headers=editor_headers,
+        json={"content": "Editor-owned comment"},
+    )
+    assert editor_own_comment.status_code == 201
+    assert (
+        client.delete(
+            f"/api/v1/comments/{editor_own_comment.json()['id']}",
             headers=editor_headers,
         ).status_code
         == 204
     )
 
-    admin_comment = client.post(
+    owner_deletable_comment = client.post(
         comments_url,
-        headers=admin_headers,
-        json={"content": "Admin comment"},
+        headers=editor_headers,
+        json={"content": "Owner may delete"},
     )
-    assert admin_comment.status_code == 201
+    assert owner_deletable_comment.status_code == 201
     assert (
         client.delete(
-            f"/api/v1/comments/{admin_comment.json()['id']}",
-            headers=admin_headers,
+            f"/api/v1/comments/{owner_deletable_comment.json()['id']}",
+            headers=owner_headers,
         ).status_code
         == 204
     )
+
+    viewer_owned_comment = client.post(
+        comments_url,
+        headers=editor_headers,
+        json={"content": "Author is now a viewer"},
+    )
+    assert viewer_owned_comment.status_code == 201
+    set_workspace_member_role(
+        workspace_id,
+        editor_id,
+        WorkspaceRole.VIEWER,
+    )
+    assert (
+        client.delete(
+            f"/api/v1/comments/{viewer_owned_comment.json()['id']}",
+            headers=editor_headers,
+        ).status_code
+        == 204
+    )
+
+    admin_deletable_comment = client.post(
+        comments_url,
+        headers=owner_headers,
+        json={"content": "Admin may delete"},
+    )
+    assert admin_deletable_comment.status_code == 201
+    admin_delete = client.delete(
+        f"/api/v1/comments/{admin_deletable_comment.json()['id']}",
+        headers=admin_headers,
+    )
+    assert admin_delete.status_code == 204
 
 
 def test_comment_pagination(
@@ -273,15 +326,18 @@ def test_archived_project_rejects_comment_writes(
     create_test_workspace: Callable[[dict[str, str]], int],
     create_test_project: Callable[[dict[str, str], int], int],
     create_test_task: Callable[[dict[str, str], int, str], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
 ) -> None:
     _, headers = register_and_login()
+    author_id, author_headers = register_and_login()
     workspace_id = create_test_workspace(headers)
     project_id = create_test_project(headers, workspace_id)
     task_id = create_test_task(headers, project_id, "Archived comment task")
+    add_workspace_member(headers, workspace_id, author_id, "EDITOR")
     comments_url = f"/api/v1/tasks/{task_id}/comments"
     existing = client.post(
         comments_url,
-        headers=headers,
+        headers=author_headers,
         json={"content": "Keep readable after archive"},
     )
     assert existing.status_code == 201
@@ -296,19 +352,25 @@ def test_archived_project_rejects_comment_writes(
 
     create_response = client.post(
         comments_url,
-        headers=headers,
+        headers=author_headers,
         json={"content": "Cannot create"},
     )
-    delete_response = client.delete(
+    author_delete_response = client.delete(
+        f"/api/v1/comments/{comment_id}",
+        headers=author_headers,
+    )
+    owner_delete_response = client.delete(
         f"/api/v1/comments/{comment_id}",
         headers=headers,
     )
     assert create_response.status_code == 400
     assert create_response.json()["detail"] == PROJECT_ARCHIVED
-    assert delete_response.status_code == 400
-    assert delete_response.json()["detail"] == PROJECT_ARCHIVED
+    assert author_delete_response.status_code == 400
+    assert author_delete_response.json()["detail"] == PROJECT_ARCHIVED
+    assert owner_delete_response.status_code == 400
+    assert owner_delete_response.json()["detail"] == PROJECT_ARCHIVED
 
-    listed = client.get(comments_url, headers=headers)
+    listed = client.get(comments_url, headers=author_headers)
     assert listed.status_code == 200
     assert [item["id"] for item in listed.json()["items"]] == [comment_id]
 

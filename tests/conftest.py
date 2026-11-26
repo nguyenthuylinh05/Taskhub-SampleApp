@@ -14,7 +14,7 @@ from alembic.config import Config
 from app.core.config import settings
 from app.core.database import get_db_session
 from app.main import app
-from app.models import User, UserRole, Workspace
+from app.models import User, UserRole, Workspace, WorkspaceRole, workspace_members
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import (
@@ -151,6 +151,40 @@ def add_workspace_member(
         assert response.status_code == 201
 
     return _add_workspace_member
+
+
+@pytest.fixture
+def set_workspace_member_role() -> Callable[[int, int, WorkspaceRole], None]:
+    """Update a test user's workspace role in the dedicated test database."""
+
+    def _set_workspace_member_role(
+        workspace_id: int,
+        user_id: int,
+        role: WorkspaceRole,
+    ) -> None:
+        async def update_role() -> None:
+            engine = create_async_engine(
+                settings.TEST_DATABASE_URL,
+                poolclass=NullPool,
+            )
+            try:
+                async with engine.begin() as connection:
+                    result = await connection.execute(
+                        update(workspace_members)
+                        .where(
+                            workspace_members.c.workspace_id == workspace_id,
+                            workspace_members.c.user_id == user_id,
+                        )
+                        .values(role=role)
+                    )
+                    if result.rowcount != 1:
+                        raise AssertionError("Workspace membership was not updated")
+            finally:
+                await engine.dispose()
+
+        anyio.run(update_role)
+
+    return _set_workspace_member_role
 
 
 @pytest.fixture
