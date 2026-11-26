@@ -379,3 +379,277 @@ def test_comment_schema_enforces_content_max_length() -> None:
     assert CommentCreate(content="x" * COMMENT_CONTENT_MAX_LENGTH)
     with pytest.raises(ValidationError):
         CommentCreate(content="x" * (COMMENT_CONTENT_MAX_LENGTH + 1))
+
+
+def test_comment_author_can_update_as_editor_and_viewer(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
+    set_workspace_member_role: Callable[[int, int, WorkspaceRole], None],
+) -> None:
+    _, owner_headers = register_and_login()
+    author_id, author_headers = register_and_login()
+    workspace_id = create_test_workspace(owner_headers)
+    project_id = create_test_project(owner_headers, workspace_id)
+    task_id = create_test_task(owner_headers, project_id, "Comment update task")
+    add_workspace_member(
+        owner_headers,
+        workspace_id,
+        author_id,
+        "EDITOR",
+    )
+
+    created = client.post(
+        f"/api/v1/tasks/{task_id}/comments",
+        headers=author_headers,
+        json={"content": "Original content"},
+    )
+    assert created.status_code == 201
+    comment_id = created.json()["id"]
+
+    editor_update = client.patch(
+        f"/api/v1/comments/{comment_id}",
+        headers=author_headers,
+        json={"content": "  Edited as editor  "},
+    )
+    assert editor_update.status_code == 200
+    assert editor_update.json()["content"] == "Edited as editor"
+    assert editor_update.json()["author_id"] == author_id
+    assert editor_update.json()["task_id"] == task_id
+
+    set_workspace_member_role(
+        workspace_id,
+        author_id,
+        WorkspaceRole.VIEWER,
+    )
+    viewer_update = client.patch(
+        f"/api/v1/comments/{comment_id}",
+        headers=author_headers,
+        json={"content": "Edited as viewer"},
+    )
+    assert viewer_update.status_code == 200
+    assert viewer_update.json()["content"] == "Edited as viewer"
+
+
+def test_only_comment_author_can_update_with_workspace_access(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
+    promote_to_admin: Callable[[int], None],
+) -> None:
+    _, owner_headers = register_and_login()
+    author_id, author_headers = register_and_login()
+    editor_id, editor_headers = register_and_login()
+    viewer_id, viewer_headers = register_and_login()
+    removed_id, removed_headers = register_and_login()
+    admin_id, admin_headers = register_and_login()
+    _, outsider_headers = register_and_login()
+    promote_to_admin(admin_id)
+
+    workspace_id = create_test_workspace(owner_headers)
+    project_id = create_test_project(owner_headers, workspace_id)
+    task_id = create_test_task(owner_headers, project_id, "Comment permissions task")
+    for member_id, role in (
+        (author_id, "EDITOR"),
+        (editor_id, "EDITOR"),
+        (viewer_id, "VIEWER"),
+        (removed_id, "EDITOR"),
+    ):
+        add_workspace_member(
+            owner_headers,
+            workspace_id,
+            member_id,
+            role,
+        )
+
+    created = client.post(
+        f"/api/v1/tasks/{task_id}/comments",
+        headers=author_headers,
+        json={"content": "Author-owned comment"},
+    )
+    assert created.status_code == 201
+    comment_id = created.json()["id"]
+    comment_url = f"/api/v1/comments/{comment_id}"
+    removed_member_comment = client.post(
+        f"/api/v1/tasks/{task_id}/comments",
+        headers=removed_headers,
+        json={"content": "Comment by member who will be removed"},
+    )
+    assert removed_member_comment.status_code == 201
+
+    for headers in (
+        editor_headers,
+        viewer_headers,
+        owner_headers,
+        admin_headers,
+    ):
+        denied = client.patch(
+            comment_url,
+            headers=headers,
+            json={"content": "Not the author"},
+        )
+        assert denied.status_code == 403
+
+    assert (
+        client.patch(
+            comment_url,
+            headers=outsider_headers,
+            json={"content": "No workspace access"},
+        ).status_code
+        == 404
+    )
+
+    removed = client.delete(
+        f"/api/v1/workspaces/{workspace_id}/members/{removed_id}",
+        headers=owner_headers,
+    )
+    assert removed.status_code == 204
+    removed_member_update = client.patch(
+        f"/api/v1/comments/{removed_member_comment.json()['id']}",
+        headers=removed_headers,
+        json={"content": "Cannot update after membership removal"},
+    )
+    assert removed_member_update.status_code == 404
+
+
+def test_comment_update_validates_payload_and_preserves_system_fields(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
+) -> None:
+    author_id, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    project_id = create_test_project(headers, workspace_id)
+    task_id = create_test_task(headers, project_id, "Comment validation task")
+    comments_url = f"/api/v1/tasks/{task_id}/comments"
+
+    created = client.post(
+        comments_url,
+        headers=headers,
+        json={"content": "Original content"},
+    )
+    assert created.status_code == 201
+    comment_id = created.json()["id"]
+    comment_url = f"/api/v1/comments/{comment_id}"
+
+    assert (
+        client.patch(
+            "/api/v1/comments/999999",
+            headers=headers,
+            json={"content": "Missing comment"},
+        ).status_code
+        == 404
+    )
+    for payload in (
+        {"content": ""},
+        {"content": " \t "},
+        {"content": "x" * (COMMENT_CONTENT_MAX_LENGTH + 1)},
+        {},
+    ):
+        assert (
+            client.patch(comment_url, headers=headers, json=payload).status_code == 422
+        )
+
+    protected_fields = client.patch(
+        comment_url,
+        headers=headers,
+        json={
+            "content": "Attempt to override system fields",
+            "author_id": author_id + 1,
+            "user_id": author_id + 1,
+            "task_id": task_id + 1,
+        },
+    )
+    assert protected_fields.status_code == 422
+
+    listed = client.get(comments_url, headers=headers)
+    assert listed.status_code == 200
+    updated_comment = listed.json()["items"][0]
+    assert updated_comment["id"] == comment_id
+    assert updated_comment["task_id"] == task_id
+    assert updated_comment["author_id"] == author_id
+    assert updated_comment["content"] == "Original content"
+
+
+def test_comment_author_cannot_update_archived_project_comment(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
+) -> None:
+    _, owner_headers = register_and_login()
+    author_id, author_headers = register_and_login()
+    workspace_id = create_test_workspace(owner_headers)
+    project_id = create_test_project(owner_headers, workspace_id)
+    task_id = create_test_task(owner_headers, project_id, "Archived comment task")
+    add_workspace_member(
+        owner_headers,
+        workspace_id,
+        author_id,
+        "EDITOR",
+    )
+
+    created = client.post(
+        f"/api/v1/tasks/{task_id}/comments",
+        headers=author_headers,
+        json={"content": "Existing comment"},
+    )
+    assert created.status_code == 201
+    comment_id = created.json()["id"]
+
+    archived = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/projects/{project_id}",
+        headers=owner_headers,
+        json={"status": "ARCHIVED"},
+    )
+    assert archived.status_code == 200
+
+    update = client.patch(
+        f"/api/v1/comments/{comment_id}",
+        headers=author_headers,
+        json={"content": "Cannot update after archive"},
+    )
+    assert update.status_code == 400
+    assert update.json()["detail"] == PROJECT_ARCHIVED
+
+
+def test_comment_update_accepts_maximum_content_length(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    create_test_task: Callable[[dict[str, str], int, str], int],
+) -> None:
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    project_id = create_test_project(headers, workspace_id)
+    task_id = create_test_task(headers, project_id, "Maximum comment task")
+
+    created = client.post(
+        f"/api/v1/tasks/{task_id}/comments",
+        headers=headers,
+        json={"content": "Original"},
+    )
+    assert created.status_code == 201
+
+    comment_id = created.json()["id"]
+    maximum_content = "x" * COMMENT_CONTENT_MAX_LENGTH
+
+    response = client.patch(
+        f"/api/v1/comments/{comment_id}",
+        headers=headers,
+        json={"content": maximum_content},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["content"]) == COMMENT_CONTENT_MAX_LENGTH

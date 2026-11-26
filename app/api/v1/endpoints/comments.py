@@ -8,6 +8,7 @@ from app.schemas.comment import (
     CommentCreate,
     CommentListResponse,
     CommentResponse,
+    CommentUpdate,
 )
 
 router = APIRouter(tags=["Comments"])
@@ -53,6 +54,28 @@ async def get_comments(
     pagination: PaginationDep,
 ) -> CommentListResponse:
     return await service.get_comments(task_id, current_user, pagination)
+
+
+@router.patch(
+    "/comments/{comment_id}",
+    response_model=CommentResponse,
+    summary="Update a comment",
+    description="Update a comment as its author in an accessible workspace.",
+    responses={
+        400: {"description": "Comment belongs to an archived project"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Only the comment author may update it"},
+        404: {"description": "Comment, task, project, or workspace not found"},
+        422: {"description": "Comment content is invalid"},
+    },
+)
+async def update_comment(
+    comment_id: int,
+    data: CommentUpdate,
+    current_user: CurrentUserDep,
+    service: CommentServiceDep,
+) -> CommentResponse:
+    return await service.update_comment(comment_id, data, current_user)
 
 
 @router.delete(

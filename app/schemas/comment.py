@@ -20,6 +20,18 @@ class CommentCreate(BaseSchema):
     )
 
 
+class CommentUpdate(BaseSchema):
+    """Schema for updating a task comment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(
+        min_length=1,
+        max_length=COMMENT_CONTENT_MAX_LENGTH,
+        description="Updated comment text",
+    )
+
+
 class CommentResponse(BaseSchema):
     """Schema for returning comment information."""
 

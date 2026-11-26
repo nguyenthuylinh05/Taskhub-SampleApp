@@ -12,6 +12,7 @@ from app.schemas.comment import (
     CommentCreate,
     CommentListResponse,
     CommentResponse,
+    CommentUpdate,
 )
 from app.schemas.pagination import Pagination
 from app.services.workspace_access import (
@@ -98,6 +99,30 @@ class CommentService:
             limit=pagination.limit,
         )
 
+    async def update_comment(
+        self,
+        comment_id: int,
+        data: CommentUpdate,
+        current_user: User,
+    ) -> CommentResponse:
+        comment = await self.comment_repository.get_by_id(comment_id)
+        if comment is None:
+            raise NotFoundException(COMMENT_NOT_FOUND)
+
+        _, project, _ = await self._get_task_and_authorize(
+            comment.task_id,
+            current_user,
+        )
+        ensure_project_active(project)
+        if comment.author_id != current_user.id:
+            raise PermissionDenied()
+
+        updated = await self.comment_repository.update_entity(
+            comment,
+            data.model_dump(exclude_unset=True),
+        )
+        return CommentResponse.model_validate(updated)
+
     async def delete_comment(
         self,
         comment_id: int,
@@ -111,10 +136,7 @@ class CommentService:
             comment.task_id,
             current_user,
         )
-        if (
-            comment.author_id != current_user.id
-            and access.role != WorkspaceRole.OWNER
-        ):
+        if comment.author_id != current_user.id and access.role != WorkspaceRole.OWNER:
             raise PermissionDenied()
         ensure_project_active(project)
         await self.comment_repository.delete_entity(comment)
