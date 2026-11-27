@@ -498,7 +498,7 @@ clients cannot supply `author_id` or `created_at`.
 | POST | `/tasks/{task_id}/comments` | Add a task comment | Owner / Editor |
 | GET | `/tasks/{task_id}/comments` | List task comments | Workspace access |
 | PATCH | `/comments/{comment_id}` | Update a task comment (author only) | Comment author |
-| DELETE | `/comments/{comment_id}` | Delete a task comment | Owner / Editor |
+| DELETE | `/comments/{comment_id}` | Delete a task comment | Comment author / Workspace OWNER |
 
 System administrators receive owner-level access through the existing
 workspace authorization policy. Viewers can read accessible labels and
