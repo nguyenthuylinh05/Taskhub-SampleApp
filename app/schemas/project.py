@@ -1,13 +1,16 @@
-from datetime import datetime
-from uuid import UUID
+"""Project request and response schemas."""
 
-from pydantic import ConfigDict, Field, field_validator
+from datetime import datetime
+
+from pydantic import Field, model_validator
 
 from app.core.constants import (
     PROJECT_DESCRIPTION_MAX_LENGTH,
     PROJECT_NAME_MAX_LENGTH,
     PROJECT_NAME_MIN_LENGTH,
 )
+from app.core.messages import UPDATE_FIELDS_CANNOT_BE_NULL, UPDATE_FIELDS_REQUIRED
+from app.models.enums import ProjectStatus
 from app.schemas.base import BaseSchema
 
 
@@ -38,21 +41,29 @@ class ProjectUpdate(BaseSchema):
         default=None,
         max_length=PROJECT_DESCRIPTION_MAX_LENGTH,
     )
+    status: ProjectStatus | None = None
 
-    @field_validator("name", mode="before")
-    @classmethod
-    def reject_null_name(cls, value: object) -> object:
-        if value is None:
-            raise ValueError("Project name cannot be null.")
-        return value
+    @model_validator(mode="after")
+    def validate_update_fields(self) -> "ProjectUpdate":
+        """Require an update and reject null fields that cannot be cleared."""
+        if not self.model_fields_set:
+            raise ValueError(UPDATE_FIELDS_REQUIRED)
+
+        if any(
+            field_name in self.model_fields_set and getattr(self, field_name) is None
+            for field_name in ("name", "status")
+        ):
+            raise ValueError(UPDATE_FIELDS_CANNOT_BE_NULL)
+
+        return self
 
 
 class ProjectResponse(BaseSchema):
     """Schema for returning project information."""
 
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
+    id: int
+    workspace_id: int
     name: str
     description: str | None
+    status: ProjectStatus
     created_at: datetime

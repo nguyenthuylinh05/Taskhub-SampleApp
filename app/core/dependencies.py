@@ -1,24 +1,60 @@
-from typing import Annotated, cast
+from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories.project import InMemoryProjectRepository
+from app.core.constants import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_LIMIT,
+    MAX_PAGE_LIMIT,
+)
+from app.core.database import get_db_session
+from app.repositories.comment import CommentRepository
+from app.repositories.label import LabelRepository
+from app.repositories.project import ProjectRepository
+from app.repositories.task import TaskRepository
+from app.repositories.user import UserRepository
+from app.repositories.workspace import WorkspaceRepository
+from app.schemas.pagination import Pagination
+from app.services.auth import AuthService
+from app.services.comment import CommentService
+from app.services.label import LabelService
 from app.services.project import ProjectService
+from app.services.task import TaskService
+from app.services.user import UserService
+from app.services.workspace import WorkspaceService
+
+DatabaseSessionDep = Annotated[
+    AsyncSession,
+    Depends(get_db_session),
+]
+
+
+def get_pagination(
+    page: int = Query(default=DEFAULT_PAGE, ge=1),
+    limit: int = Query(default=DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+) -> Pagination:
+    """Get validated pagination parameters."""
+
+    return Pagination(page=page, limit=limit)
+
+
+PaginationDep = Annotated[
+    Pagination,
+    Depends(get_pagination),
+]
 
 
 def get_project_repository(
-    request: Request,
-) -> InMemoryProjectRepository:
-    """Get project repository from application state."""
+    session: DatabaseSessionDep,
+) -> ProjectRepository:
+    """Get project repository."""
 
-    return cast(
-        InMemoryProjectRepository,
-        request.app.state.project_repository,
-    )
+    return ProjectRepository(session)
 
 
 ProjectRepositoryDep = Annotated[
-    InMemoryProjectRepository,
+    ProjectRepository,
     Depends(get_project_repository),
 ]
 
@@ -34,4 +70,187 @@ def get_project_service(
 ProjectServiceDep = Annotated[
     ProjectService,
     Depends(get_project_service),
+]
+
+
+def get_user_repository(
+    session: DatabaseSessionDep,
+) -> UserRepository:
+    """Get user repository."""
+
+    return UserRepository(session)
+
+
+UserRepositoryDep = Annotated[
+    UserRepository,
+    Depends(get_user_repository),
+]
+
+
+def get_user_service(
+    repository: UserRepositoryDep,
+) -> UserService:
+    """Create user service with an injected repository."""
+
+    return UserService(repository)
+
+
+UserServiceDep = Annotated[
+    UserService,
+    Depends(get_user_service),
+]
+
+
+def get_auth_service(
+    repository: UserRepositoryDep,
+) -> AuthService:
+    """Get authentication service."""
+
+    return AuthService(repository)
+
+
+AuthServiceDep = Annotated[
+    AuthService,
+    Depends(get_auth_service),
+]
+
+
+def get_workspace_repository(
+    session: DatabaseSessionDep,
+) -> WorkspaceRepository:
+    """Get workspace repository."""
+
+    return WorkspaceRepository(session)
+
+
+WorkspaceRepositoryDep = Annotated[
+    WorkspaceRepository,
+    Depends(get_workspace_repository),
+]
+
+
+def get_task_repository(
+    session: DatabaseSessionDep,
+) -> TaskRepository:
+    """Get task repository."""
+
+    return TaskRepository(session)
+
+
+TaskRepositoryDep = Annotated[
+    TaskRepository,
+    Depends(get_task_repository),
+]
+
+
+def get_workspace_service(
+    workspace_repository: WorkspaceRepositoryDep,
+    user_repository: UserRepositoryDep,
+    task_repository: TaskRepositoryDep,
+) -> WorkspaceService:
+    """Create WorkspaceService with injected repositories."""
+
+    return WorkspaceService(
+        workspace_repository=workspace_repository,
+        user_repository=user_repository,
+        task_repository=task_repository,
+    )
+
+WorkspaceServiceDep = Annotated[
+    WorkspaceService,
+    Depends(get_workspace_service),
+]
+
+
+def get_task_service(
+    task_repository: TaskRepositoryDep,
+    project_repository: ProjectRepositoryDep,
+    workspace_repository: WorkspaceRepositoryDep,
+    user_repository: UserRepositoryDep,
+) -> TaskService:
+    """Create task service with injected repositories."""
+
+    return TaskService(
+        task_repository=task_repository,
+        project_repository=project_repository,
+        workspace_repository=workspace_repository,
+        user_repository=user_repository,
+    )
+
+
+TaskServiceDep = Annotated[
+    TaskService,
+    Depends(get_task_service),
+]
+
+
+def get_label_repository(
+    session: DatabaseSessionDep,
+) -> LabelRepository:
+    """Get label repository."""
+
+    return LabelRepository(session)
+
+
+LabelRepositoryDep = Annotated[
+    LabelRepository,
+    Depends(get_label_repository),
+]
+
+
+def get_label_service(
+    label_repository: LabelRepositoryDep,
+    project_repository: ProjectRepositoryDep,
+    task_repository: TaskRepositoryDep,
+    workspace_repository: WorkspaceRepositoryDep,
+) -> LabelService:
+    """Create label service with injected repositories."""
+
+    return LabelService(
+        label_repository=label_repository,
+        project_repository=project_repository,
+        task_repository=task_repository,
+        workspace_repository=workspace_repository,
+    )
+
+
+LabelServiceDep = Annotated[
+    LabelService,
+    Depends(get_label_service),
+]
+
+
+def get_comment_repository(
+    session: DatabaseSessionDep,
+) -> CommentRepository:
+    """Get comment repository."""
+
+    return CommentRepository(session)
+
+
+CommentRepositoryDep = Annotated[
+    CommentRepository,
+    Depends(get_comment_repository),
+]
+
+
+def get_comment_service(
+    comment_repository: CommentRepositoryDep,
+    task_repository: TaskRepositoryDep,
+    project_repository: ProjectRepositoryDep,
+    workspace_repository: WorkspaceRepositoryDep,
+) -> CommentService:
+    """Create comment service with injected repositories."""
+
+    return CommentService(
+        comment_repository=comment_repository,
+        task_repository=task_repository,
+        project_repository=project_repository,
+        workspace_repository=workspace_repository,
+    )
+
+
+CommentServiceDep = Annotated[
+    CommentService,
+    Depends(get_comment_service),
 ]
