@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import pytest
 from app.models import Comment, Label, Task, User, Workspace
 from app.repositories.comment import CommentRepository
@@ -15,8 +17,7 @@ async def test_user_repository_crud_and_pagination(
     """Test user repository CRUD operations and pagination."""
 
     repository = UserRepository(db_session)
-
-    email = "repository-test@example.com"
+    email = f"repository-test-{uuid4().hex}@example.com"
 
     user = await repository.create(
         {
@@ -44,13 +45,29 @@ async def test_user_repository_crud_and_pagination(
 
     assert any(item.id == user.id for item in users)
 
+    all_users = await repository.get_all()
+    ordered_user_ids = sorted(item.id for item in all_users)
+
+    assert user.id in ordered_user_ids
+
+    user_position = ordered_user_ids.index(user.id)
+    user_page = user_position // 10 + 1
+
     first_page_users, total = await repository.get_paginated(
         page=1,
         limit=10,
     )
 
-    assert total >= 1
+    assert total == len(ordered_user_ids)
     assert len(first_page_users) <= 10
+
+    user_page_users, user_page_total = await repository.get_paginated(
+        page=user_page,
+        limit=10,
+    )
+
+    assert user_page_total == total
+    assert any(item.id == user.id for item in user_page_users)
 
     last_page = (total - 1) // 10 + 1
 

@@ -31,7 +31,7 @@ class UserService:
 
         user_data = data.model_dump(exclude={"password"})
         user_data["email"] = str(data.email)
-        user_data["hashed_password"] = hash_password(data.password)
+        user_data["hashed_password"] = await hash_password(data.password)
 
         try:
             user = await self.repository.create(user_data)
