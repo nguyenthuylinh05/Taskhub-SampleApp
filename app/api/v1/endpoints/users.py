@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Response, status
 
 from app.api.dependencies import CurrentUserDep, require_admin
-from app.core.dependencies import AuthServiceDep, UserServiceDep
+from app.core.dependencies import AuthServiceDep, PaginationDep, UserServiceDep
 from app.schemas.user import (
     ChangePasswordRequest,
     UserCreate,
@@ -59,12 +59,11 @@ async def update_current_user_profile(
 )
 async def get_users(
     user_service: UserServiceDep,
-    page: int = Query(default=1, ge=1),
-    limit: int = Query(default=10, ge=1, le=100),
+    pagination: PaginationDep,
 ) -> UserListResponse:
     return await user_service.get_users(
-        page=page,
-        limit=limit,
+        page=pagination.page,
+        limit=pagination.limit,
     )
 
 

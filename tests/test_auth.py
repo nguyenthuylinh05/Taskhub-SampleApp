@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import TypedDict, cast
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -7,7 +8,7 @@ import jwt
 import pytest
 from app.core.config import JWT_ALGORITHM, JWT_SECRET_KEY, settings
 from app.core.exceptions import InvalidRefreshToken
-from app.models import User, UserRole
+from app.models import User
 from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -66,31 +67,6 @@ def login_user(
     assert response.status_code == 200
 
     return cast(str, response.json()["access_token"])
-
-
-def promote_to_admin(user_id: int) -> None:
-    """Promote a test user to ADMIN directly in the database."""
-
-    async def update_role() -> None:
-        test_engine = create_async_engine(
-            settings.TEST_DATABASE_URL,
-            poolclass=NullPool,
-        )
-        session_factory = async_sessionmaker(
-            test_engine,
-            expire_on_commit=False,
-        )
-
-        try:
-            async with session_factory() as session:
-                await session.execute(
-                    update(User).where(User.id == user_id).values(role=UserRole.ADMIN)
-                )
-                await session.commit()
-        finally:
-            await test_engine.dispose()
-
-    anyio.run(update_role)
 
 
 def test_register_success(
@@ -502,7 +478,6 @@ def test_change_password_rolls_back_when_redis_fails(
     assert new_password_response.status_code == 401
 
 
-
 def test_old_password_cannot_login_after_password_change(
     client: TestClient,
     cleanup_user: list[int],
@@ -530,7 +505,6 @@ def test_old_password_cannot_login_after_password_change(
     )
 
     assert old_password_response.status_code == 401
-
 
 
 def test_change_password_wrong_current_password(
@@ -646,6 +620,7 @@ def test_inactive_user_cannot_access_protected_endpoint(
 def test_admin_cannot_delete_self(
     client: TestClient,
     cleanup_user: list[int],
+    promote_to_admin: Callable[[int], None],
 ) -> None:
     admin = register_user(client, cleanup_user)
     promote_to_admin(admin["id"])
@@ -663,6 +638,7 @@ def test_admin_cannot_delete_self(
 def test_cannot_demote_last_active_admin(
     client: TestClient,
     cleanup_user: list[int],
+    promote_to_admin: Callable[[int], None],
 ) -> None:
     admin = register_user(client, cleanup_user)
     promote_to_admin(admin["id"])
@@ -683,6 +659,7 @@ def test_cannot_demote_last_active_admin(
 def test_cannot_deactivate_last_active_admin(
     client: TestClient,
     cleanup_user: list[int],
+    promote_to_admin: Callable[[int], None],
 ) -> None:
     admin = register_user(client, cleanup_user)
     promote_to_admin(admin["id"])
@@ -703,6 +680,7 @@ def test_cannot_deactivate_last_active_admin(
 def test_can_delete_admin_when_another_active_admin_exists(
     client: TestClient,
     cleanup_user: list[int],
+    promote_to_admin: Callable[[int], None],
 ) -> None:
     admin = register_user(client, cleanup_user)
     promote_to_admin(admin["id"])

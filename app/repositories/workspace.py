@@ -7,6 +7,7 @@ from app.core.messages import WORKSPACE_MEMBER_ALREADY_EXISTS
 from app.models import User, Workspace, WorkspaceRole
 from app.models.workspace import workspace_members
 from app.repositories.base import BaseRepository
+from app.schemas.pagination import Pagination
 
 
 class WorkspaceRepository(BaseRepository[Workspace]):
@@ -18,8 +19,7 @@ class WorkspaceRepository(BaseRepository[Workspace]):
     async def get_user_workspaces_paginated(
         self,
         user_id: int,
-        page: int,
-        limit: int,
+        pagination: Pagination,
     ) -> tuple[list[Workspace], int]:
         """Get owned or joined workspaces with pagination."""
         filters = (Workspace.owner_id == user_id) | (
@@ -42,7 +42,9 @@ class WorkspaceRepository(BaseRepository[Workspace]):
         total = await self.session.scalar(count_query) or 0
 
         statement = (
-            base_query.order_by(Workspace.id).offset((page - 1) * limit).limit(limit)
+            base_query.order_by(Workspace.id)
+            .offset((pagination.page - 1) * pagination.limit)
+            .limit(pagination.limit)
         )
 
         result = await self.session.scalars(statement)

@@ -562,3 +562,125 @@ def test_cannot_add_duplicate_workspace_member(
     )
 
     assert second_response.status_code == 409
+
+
+def test_removing_member_unassigns_tasks_only_in_target_workspace(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    """Removing a member unassigns their tasks only in the target workspace."""
+
+    owner = register_user(client, cleanup_user)
+    member = register_user(client, cleanup_user)
+
+    owner_token = login_user(client, owner)
+    member_id = member["id"]
+
+    # Arrange: create two workspaces owned by the same user.
+    first_workspace = create_workspace(
+        client,
+        owner_token,
+        cleanup_workspace,
+    )
+    second_workspace = create_workspace(
+        client,
+        owner_token,
+        cleanup_workspace,
+    )
+
+    first_workspace_id = cast(int, first_workspace["id"])
+    second_workspace_id = cast(int, second_workspace["id"])
+
+    # Add the same member to both workspaces.
+    for workspace_id in (first_workspace_id, second_workspace_id):
+        response = client.post(
+            f"/api/v1/workspaces/{workspace_id}/members",
+            headers=auth_headers(owner_token),
+            json={
+                "user_id": member_id,
+                "role": "EDITOR",
+            },
+        )
+        assert response.status_code == 201
+
+    # Arrange: create one project in each workspace.
+    first_project = client.post(
+        f"/api/v1/workspaces/{first_workspace_id}/projects",
+        headers=auth_headers(owner_token),
+        json={"name": "First Workspace Project"},
+    )
+    assert first_project.status_code == 201
+
+    second_project = client.post(
+        f"/api/v1/workspaces/{second_workspace_id}/projects",
+        headers=auth_headers(owner_token),
+        json={"name": "Second Workspace Project"},
+    )
+    assert second_project.status_code == 201
+
+    first_project_id = first_project.json()["id"]
+    second_project_id = second_project.json()["id"]
+
+    # Arrange: create and assign one task in each workspace.
+    first_task = client.post(
+        f"/api/v1/projects/{first_project_id}/tasks",
+        headers=auth_headers(owner_token),
+        json={
+            "title": "Task in first workspace",
+            "assignee_id": member_id,
+        },
+    )
+    assert first_task.status_code == 201
+
+    second_task = client.post(
+        f"/api/v1/projects/{second_project_id}/tasks",
+        headers=auth_headers(owner_token),
+        json={
+            "title": "Task in second workspace",
+            "assignee_id": member_id,
+        },
+    )
+    assert second_task.status_code == 201
+
+    first_task_id = first_task.json()["id"]
+    second_task_id = second_task.json()["id"]
+
+    assert first_task.json()["assignee_id"] == member_id
+    assert second_task.json()["assignee_id"] == member_id
+
+    # Act: remove the member from the first workspace.
+    remove_response = client.delete(
+        f"/api/v1/workspaces/{first_workspace_id}/members/{member_id}",
+        headers=auth_headers(owner_token),
+    )
+    assert remove_response.status_code == 204
+
+    # Assert: the first task is preserved but unassigned.
+    first_task_after = client.get(
+        f"/api/v1/projects/{first_project_id}/tasks",
+        headers=auth_headers(owner_token),
+    )
+    assert first_task_after.status_code == 200
+
+    first_tasks = first_task_after.json()["items"]
+    updated_first_task = next(
+        task for task in first_tasks if task["id"] == first_task_id
+    )
+
+    assert updated_first_task["assignee_id"] is None
+    assert updated_first_task["title"] == "Task in first workspace"
+
+    # Assert: the task in the second workspace remains assigned.
+    second_task_after = client.get(
+        f"/api/v1/projects/{second_project_id}/tasks",
+        headers=auth_headers(owner_token),
+    )
+    assert second_task_after.status_code == 200
+
+    second_tasks = second_task_after.json()["items"]
+    unchanged_second_task = next(
+        task for task in second_tasks if task["id"] == second_task_id
+    )
+
+    assert unchanged_second_task["assignee_id"] == member_id

@@ -1,8 +1,9 @@
-﻿"""Shared fixtures for database and API tests."""
+"""Shared fixtures for database and API tests."""
 
 import os
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import anyio
 import pytest
@@ -13,15 +14,150 @@ from alembic.config import Config
 from app.core.config import settings
 from app.core.database import get_db_session
 from app.main import app
-from app.models import User, Workspace
+from app.models import User, UserRole, Workspace
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 from sqlalchemy.pool import NullPool
+
+
+@pytest.fixture
+def register_and_login(
+    client: TestClient,
+    cleanup_user: list[int],
+) -> Callable[[], tuple[int, dict[str, str]]]:
+    """Register a test user and return its ID and authentication headers."""
+
+    def _register_and_login() -> tuple[int, dict[str, str]]:
+        email = f"test_{uuid4().hex[:12]}@example.com"
+
+        register_response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": email,
+                "full_name": "Test User",
+                "password": "TestPassword123",
+            },
+        )
+        assert register_response.status_code == 201
+
+        user_id = register_response.json()["id"]
+        cleanup_user.append(user_id)
+
+        login_response = client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": email,
+                "password": "TestPassword123",
+            },
+        )
+        assert login_response.status_code == 200
+
+        token = login_response.json()["access_token"]
+        return user_id, {"Authorization": f"Bearer {token}"}
+
+    return _register_and_login
+
+
+@pytest.fixture
+def create_test_workspace(
+    client: TestClient,
+    cleanup_workspace: list[int],
+) -> Callable[[dict[str, str]], int]:
+    """Create a test workspace and register it for cleanup."""
+
+    def _create_test_workspace(headers: dict[str, str]) -> int:
+        response = client.post(
+            "/api/v1/workspaces",
+            headers=headers,
+            json={"name": "Test Workspace"},
+        )
+        assert response.status_code == 201
+
+        workspace_id = response.json()["id"]
+        assert isinstance(workspace_id, int)
+
+        cleanup_workspace.append(workspace_id)
+        return workspace_id
+
+    return _create_test_workspace
+
+
+@pytest.fixture
+def create_test_project(
+    client: TestClient,
+) -> Callable[[dict[str, str], int], int]:
+    """Create a test project through the public API."""
+
+    def _create_test_project(headers: dict[str, str], workspace_id: int) -> int:
+        response = client.post(
+            f"/api/v1/workspaces/{workspace_id}/projects",
+            headers=headers,
+            json={"name": "Task Test Project"},
+        )
+        assert response.status_code == 201
+        project_id = response.json()["id"]
+        assert isinstance(project_id, int)
+        return project_id
+
+    return _create_test_project
+
+
+@pytest.fixture
+def add_workspace_member(
+    client: TestClient,
+) -> Callable[[dict[str, str], int, int, str], None]:
+    """Add a test user to a workspace through the public API."""
+
+    def _add_workspace_member(
+        headers: dict[str, str],
+        workspace_id: int,
+        user_id: int,
+        role: str,
+    ) -> None:
+        response = client.post(
+            f"/api/v1/workspaces/{workspace_id}/members",
+            headers=headers,
+            json={"user_id": user_id, "role": role},
+        )
+        assert response.status_code == 201
+
+    return _add_workspace_member
+
+
+@pytest.fixture
+def promote_to_admin() -> Callable[[int], None]:
+    """Promote a test user to ADMIN directly in the test database."""
+
+    def _promote_to_admin(user_id: int) -> None:
+        async def update_role() -> None:
+            test_engine = create_async_engine(
+                settings.TEST_DATABASE_URL,
+                poolclass=NullPool,
+            )
+            session_factory = async_sessionmaker(
+                test_engine,
+                expire_on_commit=False,
+            )
+
+            try:
+                async with session_factory() as session:
+                    await session.execute(
+                        update(User)
+                        .where(User.id == user_id)
+                        .values(role=UserRole.ADMIN)
+                    )
+                    await session.commit()
+            finally:
+                await test_engine.dispose()
+
+        anyio.run(update_role)
+
+    return _promote_to_admin
 
 
 @pytest.fixture(scope="session")
