@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,7 @@ from app.core.exception_handlers import (
 )
 from app.core.exceptions import AppException
 from app.core.logging import configure_logging
+from app.core.redis import close_redis_connection
 from app.middleware.request_logging import RequestLoggingMiddleware
 
 settings = get_settings()
@@ -28,7 +30,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        await engine.dispose()
+        try:
+            await close_redis_connection()
+        except Exception:
+            logging.getLogger("taskhub.cache").exception("Redis shutdown failed")
+            raise
+        finally:
+            await engine.dispose()
 
 
 app = FastAPI(

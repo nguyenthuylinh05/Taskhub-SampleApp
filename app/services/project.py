@@ -1,3 +1,4 @@
+from app.core.database import register_project_cache_invalidation
 from app.core.exceptions import NotFoundException
 from app.core.messages import PROJECT_NOT_FOUND
 from app.repositories.project import ProjectRepository
@@ -29,10 +30,7 @@ class ProjectService:
         workspace_id: int,
     ) -> list[ProjectResponse]:
         projects = await self.repository.get_by_workspace_id(workspace_id)
-        return [
-            ProjectResponse.model_validate(project)
-            for project in projects
-        ]
+        return [ProjectResponse.model_validate(project) for project in projects]
 
     async def get_project(
         self,
@@ -75,3 +73,7 @@ class ProjectService:
         )
         if not deleted:
             raise NotFoundException(PROJECT_NOT_FOUND)
+        register_project_cache_invalidation(
+            self.repository.session,
+            project_id,
+        )

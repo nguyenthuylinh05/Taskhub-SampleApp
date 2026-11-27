@@ -1,7 +1,12 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
+import app.core.redis as redis_module
+import pytest
+import redis as redis_sync
 from app.core.messages import PROJECT_ARCHIVED
+from app.repositories.task import TaskRepository
 from fastapi.testclient import TestClient
 
 
@@ -1229,3 +1234,317 @@ def test_member_cannot_access_tasks_from_another_workspace(
     assert owner_b_response.status_code == 200
     assert owner_b_response.json()["total"] == 1
     assert owner_b_response.json()["items"][0]["title"] == ("Task in workspace B")
+
+
+def test_task_list_cache_miss_hit_preserves_labels_and_pagination(
+    client: TestClient,
+    task_cache_redis: redis_sync.Redis,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    project_id = create_test_project(headers, workspace_id)
+    url = f"/api/v1/projects/{project_id}/tasks"
+
+    task_response = client.post(
+        url,
+        headers=headers,
+        json={"title": "Cached task"},
+    )
+    assert task_response.status_code == 201
+    task_id = task_response.json()["id"]
+
+    label_response = client.post(
+        f"/api/v1/projects/{project_id}/labels",
+        headers=headers,
+        json={"name": "Cache label", "color": "#123ABC"},
+    )
+    assert label_response.status_code == 201
+    label_id = label_response.json()["id"]
+    assert (
+        client.post(
+            f"/api/v1/tasks/{task_id}/labels/{label_id}",
+            headers=headers,
+        ).status_code
+        == 204
+    )
+
+    original = TaskRepository.get_filtered_by_project
+    database_calls = 0
+
+    async def counted_query(
+        self: TaskRepository,
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[list[object], int]:
+        nonlocal database_calls
+        database_calls += 1
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        TaskRepository,
+        "get_filtered_by_project",
+        counted_query,
+    )
+
+    first = client.get(
+        f"{url}?page=1&limit=10",
+        headers=headers,
+    )
+    assert first.status_code == 200
+    assert database_calls == 1
+    assert first.json()["total"] == 1
+    assert first.json()["page"] == 1
+    assert first.json()["limit"] == 10
+    assert first.json()["items"][0]["labels"][0]["id"] == label_id
+
+    cache_keys = list(task_cache_redis.scan_iter(match="task-list:v1:*"))
+    assert len(cache_keys) == 1
+
+    second = client.get(
+        f"{url}?limit=10&page=1",
+        headers=headers,
+    )
+    assert second.status_code == 200
+    assert database_calls == 1
+    assert second.json() == first.json()
+    assert second.json()["items"][0]["labels"][0]["name"] == "Cache label"
+
+
+def test_malformed_task_cache_is_treated_as_cache_miss(
+    client: TestClient,
+    task_cache_redis: redis_sync.Redis,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+) -> None:
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    project_id = create_test_project(headers, workspace_id)
+    url = f"/api/v1/projects/{project_id}/tasks"
+
+    first = client.get(url, headers=headers)
+    assert first.status_code == 200
+
+    cache_keys = list(task_cache_redis.scan_iter(match="task-list:v1:*"))
+    assert len(cache_keys) == 1
+    task_cache_redis.set(cache_keys[0], "{not-valid-json")
+
+    fallback = client.get(url, headers=headers)
+    assert fallback.status_code == 200
+    assert fallback.json() == first.json()
+
+
+def test_task_list_authorization_runs_before_cache_access(
+    client: TestClient,
+    task_cache_redis: redis_sync.Redis,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner_id, owner_headers = register_and_login()
+    member_id, member_headers = register_and_login()
+    _, outsider_headers = register_and_login()
+    workspace_id = create_test_workspace(owner_headers)
+    project_id = create_test_project(owner_headers, workspace_id)
+    add_workspace_member(owner_headers, workspace_id, member_id, "VIEWER")
+    url = f"/api/v1/projects/{project_id}/tasks"
+
+    import app.services.task as task_service_module
+
+    version_spy = AsyncMock(
+        wraps=task_service_module.get_task_list_cache_version,
+    )
+    cache_get_spy = AsyncMock(
+        wraps=task_service_module.get_task_list_cached_response,
+    )
+    monkeypatch.setattr(
+        task_service_module,
+        "get_task_list_cache_version",
+        version_spy,
+    )
+    monkeypatch.setattr(
+        task_service_module,
+        "get_task_list_cached_response",
+        cache_get_spy,
+    )
+
+    outsider_list = client.get(url, headers=outsider_headers)
+    assert outsider_list.status_code == 404
+    assert outsider_list.json()["detail"] == "Project not found"
+    assert version_spy.await_count == 0
+    assert cache_get_spy.await_count == 0
+
+    owner_list = client.get(url, headers=owner_headers)
+    assert owner_list.status_code == 200
+    assert version_spy.await_count == 1
+    assert cache_get_spy.await_count == 1
+
+    owner_cache_keys = list(
+        task_cache_redis.scan_iter(match=f"task-list:v1:{project_id}:{owner_id}:*")
+    )
+    assert len(owner_cache_keys) == 1
+    assert (
+        len(
+            list(
+                task_cache_redis.scan_iter(match=f"task-list:v1:{project_id}:{member_id}:*")
+            )
+        )
+        == 0
+    )
+
+    member_list = client.get(url, headers=member_headers)
+    assert member_list.status_code == 200
+    assert version_spy.await_count == 2
+    assert cache_get_spy.await_count == 2
+
+    member_cache_keys = list(
+        task_cache_redis.scan_iter(match=f"task-list:v1:{project_id}:{member_id}:*")
+    )
+    assert len(member_cache_keys) == 1
+    assert owner_cache_keys[0] != member_cache_keys[0]
+
+
+def test_redis_read_write_failures_fall_back_to_postgresql(
+    client: TestClient,
+    task_cache_redis: redis_sync.Redis,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    project_id = create_test_project(headers, workspace_id)
+    url = f"/api/v1/projects/{project_id}/tasks"
+
+    async_client = redis_module.redis_client
+    original_get = async_client.get
+    read_failure = AsyncMock(side_effect=TimeoutError("Redis read timeout"))
+    monkeypatch.setattr(async_client, "get", read_failure)
+    read_fallback = client.get(url, headers=headers)
+    assert read_fallback.status_code == 200
+
+    monkeypatch.setattr(
+        async_client,
+        "get",
+        original_get,
+    )
+    write_failure = AsyncMock(side_effect=TimeoutError("Redis write timeout"))
+    monkeypatch.setattr(async_client, "set", write_failure)
+    write_fallback = client.get(url, headers=headers)
+    assert write_fallback.status_code == 200
+
+
+def test_search_tasks_by_title_description_and_combined_filters(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+    add_workspace_member: Callable[[dict[str, str], int, int, str], None],
+) -> None:
+    owner_id, owner_headers = register_and_login()
+    assignee_id, assignee_headers = register_and_login()
+    workspace_id = create_test_workspace(owner_headers)
+    project_id = create_test_project(owner_headers, workspace_id)
+    add_workspace_member(owner_headers, workspace_id, assignee_id, "EDITOR")
+    url = f"/api/v1/projects/{project_id}/tasks"
+
+    for task_data in (
+        {
+            "title": "Fix Alpha API",
+            "description": "Use the 100%_safe parser",
+            "assignee_id": assignee_id,
+            "status": "IN_PROGRESS",
+            "priority": "HIGH",
+        },
+        {
+            "title": "Write documentation",
+            "description": "Parser examples",
+            "assignee_id": owner_id,
+            "status": "TODO",
+            "priority": "LOW",
+        },
+        {"title": "Unrelated task", "description": None},
+    ):
+        response = client.post(url, headers=owner_headers, json=task_data)
+        assert response.status_code == 201
+        if task_data.get("status") is not None:
+            update = client.patch(
+                f"/api/v1/tasks/{response.json()['id']}",
+                headers=owner_headers,
+                json={"status": task_data["status"]},
+            )
+            assert update.status_code == 200
+
+    title_search = client.get(
+        url,
+        headers=assignee_headers,
+        params={"search": "  ALPHA  "},
+    )
+    assert title_search.status_code == 200
+    assert title_search.json()["total"] == 1
+    assert title_search.json()["items"][0]["title"] == "Fix Alpha API"
+
+    description_search = client.get(
+        url,
+        headers=owner_headers,
+        params={"search": "examples"},
+    )
+    assert description_search.status_code == 200
+    assert description_search.json()["total"] == 1
+    assert description_search.json()["items"][0]["title"] == "Write documentation"
+
+    combined = client.get(
+        url,
+        headers=owner_headers,
+        params={
+            "search": "alpha",
+            "status": "IN_PROGRESS",
+            "priority": "HIGH",
+            "assignee_id": assignee_id,
+            "page": 1,
+            "limit": 10,
+        },
+    )
+    assert combined.status_code == 200
+    assert combined.json()["total"] == 1
+
+    literal_percent = client.get(
+        url,
+        headers=owner_headers,
+        params={"search": "100%"},
+    )
+    assert literal_percent.status_code == 200
+    assert literal_percent.json()["total"] == 1
+
+    literal_underscore = client.get(
+        url,
+        headers=owner_headers,
+        params={"search": "_safe"},
+    )
+    assert literal_underscore.status_code == 200
+    assert literal_underscore.json()["total"] == 1
+
+
+def test_task_search_validation(
+    client: TestClient,
+    register_and_login: Callable[[], tuple[int, dict[str, str]]],
+    create_test_workspace: Callable[[dict[str, str]], int],
+    create_test_project: Callable[[dict[str, str], int], int],
+) -> None:
+    _, headers = register_and_login()
+    workspace_id = create_test_workspace(headers)
+    project_id = create_test_project(headers, workspace_id)
+    url = f"/api/v1/projects/{project_id}/tasks"
+
+    assert client.get(url, headers=headers, params={"search": "   "}).status_code == 422
+    assert (
+        client.get(url, headers=headers, params={"search": "x" * 256}).status_code
+        == 422
+    )

@@ -5,6 +5,7 @@ from typing import NoReturn
 from sqlalchemy.exc import IntegrityError
 
 from app.core.constants import LABEL_PROJECT_NAME_CONSTRAINT
+from app.core.database import register_project_cache_invalidation
 from app.core.exceptions import (
     ConflictError,
     NotFoundException,
@@ -187,6 +188,10 @@ class LabelService:
                 label,
                 data.model_dump(exclude_unset=True),
             )
+            register_project_cache_invalidation(
+                self.label_repository.session,
+                label.project_id,
+            )
         except IntegrityError as exc:
             _raise_label_name_conflict(exc)
         return LabelResponse.model_validate(updated)
@@ -206,6 +211,10 @@ class LabelService:
         )
         ensure_project_active(project)
         await self.label_repository.delete_entity(label)
+        register_project_cache_invalidation(
+            self.label_repository.session,
+            label.project_id,
+        )
 
     async def _get_task_and_authorize_write(
         self,
@@ -240,6 +249,10 @@ class LabelService:
         inserted = await self.label_repository.assign_to_task(task_id, label_id)
         if not inserted:
             raise ConflictError(LABEL_ALREADY_ASSIGNED)
+        register_project_cache_invalidation(
+            self.label_repository.session,
+            task_project_id,
+        )
 
     async def remove_label(
         self,
@@ -257,3 +270,7 @@ class LabelService:
         removed = await self.label_repository.remove_from_task(task_id, label_id)
         if not removed:
             raise NotFoundException(LABEL_NOT_ASSIGNED)
+        register_project_cache_invalidation(
+            self.label_repository.session,
+            task_project_id,
+        )
