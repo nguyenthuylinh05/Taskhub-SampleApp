@@ -1,4 +1,4 @@
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,6 +109,26 @@ class WorkspaceRepository(BaseRepository[Workspace]):
                 workspace_members.c.workspace_id == workspace_id,
                 workspace_members.c.user_id == user_id,
             )
+            .returning(workspace_members.c.user_id)
+        )
+
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none() is not None
+
+    async def update_member_role(
+        self,
+        workspace_id: int,
+        user_id: int,
+        role: WorkspaceRole,
+    ) -> bool:
+        """Update a workspace member's role."""
+        statement = (
+            update(workspace_members)
+            .where(
+                workspace_members.c.workspace_id == workspace_id,
+                workspace_members.c.user_id == user_id,
+            )
+            .values(role=role)
             .returning(workspace_members.c.user_id)
         )
 

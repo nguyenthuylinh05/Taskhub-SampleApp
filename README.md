@@ -707,6 +707,7 @@ These endpoints require the system ADMIN role.
 |---|---|---|---|
 | POST | `/workspaces/{workspace_id}/members` | Add a workspace member | OWNER |
 | GET | `/workspaces/{workspace_id}/members` | List workspace members | Workspace access |
+| PATCH | `/workspaces/{workspace_id}/members/{user_id}` | Change a workspace member's role | OWNER |
 | DELETE | `/workspaces/{workspace_id}/members/{user_id}` | Remove a workspace member | OWNER |
 
 ### Projects

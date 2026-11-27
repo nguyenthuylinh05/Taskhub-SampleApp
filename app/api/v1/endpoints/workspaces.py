@@ -15,6 +15,7 @@ from app.schemas.workspace import (
     WorkspaceListResponse,
     WorkspaceMemberAdd,
     WorkspaceMemberResponse,
+    WorkspaceMemberRoleUpdate,
     WorkspaceResponse,
     WorkspaceUpdate,
 )
@@ -133,3 +134,33 @@ async def remove_workspace_member(
 ) -> None:
     """Remove a workspace member. Requires OWNER access."""
     await service.remove_member(access.workspace, user_id)
+
+
+@router.patch(
+    "/{workspace_id}/members/{user_id}",
+    response_model=WorkspaceMemberResponse,
+    summary="Change a workspace member's role",
+    description=(
+        "Change an existing workspace member's role between EDITOR and VIEWER. "
+        "Requires OWNER access."
+    ),
+    responses={
+        400: {"description": "Role change violates workspace rules"},
+        403: {"description": "Insufficient workspace permissions"},
+        404: {"description": "Workspace or member not found"},
+    },
+)
+async def change_workspace_member_role(
+    user_id: int,
+    data: WorkspaceMemberRoleUpdate,
+    current_user: CurrentUserDep,
+    access: WorkspaceOwnerDep,
+    service: WorkspaceServiceDep,
+) -> WorkspaceMemberResponse:
+    """Change a workspace member's role. Requires OWNER access."""
+    return await service.change_member_role(
+        access.workspace,
+        current_user,
+        user_id,
+        data.role,
+    )

@@ -1,4 +1,4 @@
-﻿"""User request and response schemas."""
+"""User request and response schemas."""
 
 from datetime import datetime
 
