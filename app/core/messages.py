@@ -39,6 +39,8 @@ WORKSPACE_MEMBER_ALREADY_EXISTS = "User is already a workspace member"
 WORKSPACE_OWNER_CANNOT_BE_MEMBER = "Workspace owner cannot be assigned as a member"
 WORKSPACE_OWNER_CANNOT_BE_REMOVED = "Workspace owner cannot be removed"
 WORKSPACE_OWNER_ROLE_INVALID = "Workspace owner role cannot be assigned"
+WORKSPACE_OWNER_ROLE_CANNOT_BE_CHANGED = "Workspace owner role cannot be changed"
+WORKSPACE_CANNOT_CHANGE_OWN_ROLE = "You cannot change your own workspace role"
 
 # Task
 TASK_NOT_FOUND = "Task not found"

@@ -2,10 +2,14 @@
 
 import json
 
+from fastapi import BackgroundTasks
 from pydantic import ValidationError
 
-from app.core.config import REDIS_TASK_CACHE_TTL_SECONDS
-from app.core.database import register_project_cache_invalidation
+from app.core.config import REDIS_TASK_CACHE_TTL_SECONDS, get_settings
+from app.core.database import (
+    invalidate_registered_project_cache_versions,
+    register_project_cache_invalidation,
+)
 from app.core.exceptions import (
     InvalidOperation,
     NotFoundException,
@@ -38,6 +42,7 @@ from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.pagination import Pagination
 from app.schemas.task import TaskCreate, TaskListResponse, TaskResponse, TaskUpdate
+from app.services.email import send_task_assignment_email
 from app.services.workspace_access import (
     ensure_project_active,
     has_workspace_write_access,
@@ -88,7 +93,7 @@ class TaskService:
         self,
         workspace: Workspace,
         assignee_id: int,
-    ) -> None:
+    ) -> User:
         """Ensure the assignee is an eligible workspace member."""
 
         assignee = await self.user_repository.get_by_id(assignee_id)
@@ -98,7 +103,7 @@ class TaskService:
 
         # Workspace owners do not need a membership record.
         if assignee_id == workspace.owner_id:
-            return
+            return assignee
 
         role = await self.workspace_repository.get_member(
             workspace.id,
@@ -110,6 +115,31 @@ class TaskService:
 
         if not has_workspace_write_access(role):
             raise InvalidOperation(TASK_ASSIGNEE_MUST_HAVE_WRITE_ACCESS)
+
+        return assignee
+
+    async def _schedule_assignment_notification_after_commit(
+        self,
+        background_tasks: BackgroundTasks,
+        task: TaskResponse,
+        project_name: str,
+        assignee: User,
+    ) -> None:
+        """Commit the assignment before registering its background email."""
+
+        if not get_settings().EMAIL_NOTIFICATIONS_ENABLED:
+            return
+
+        session = self.task_repository.session
+        await session.commit()
+        await invalidate_registered_project_cache_versions(session)
+        background_tasks.add_task(
+            send_task_assignment_email,
+            recipient_email=assignee.email,
+            task_title=task.title,
+            project_name=project_name,
+            task_id=task.id,
+        )
 
     async def _get_task_project_and_workspace(
         self,
@@ -131,6 +161,7 @@ class TaskService:
         project_id: int,
         data: TaskCreate,
         current_user: User,
+        background_tasks: BackgroundTasks,
     ) -> TaskResponse:
         """Create a task in an active project."""
 
@@ -141,8 +172,9 @@ class TaskService:
         )
         ensure_project_active(project)
 
+        assignee: User | None = None
         if data.assignee_id is not None:
-            await self._validate_assignee(workspace, data.assignee_id)
+            assignee = await self._validate_assignee(workspace, data.assignee_id)
 
         task = await self.task_repository.create(
             {
@@ -156,7 +188,15 @@ class TaskService:
             self.task_repository.session,
             project_id,
         )
-        return await self._get_task_response(task.id)
+        response = await self._get_task_response(task.id)
+        if assignee is not None:
+            await self._schedule_assignment_notification_after_commit(
+                background_tasks,
+                response,
+                project.name,
+                assignee,
+            )
+        return response
 
     async def get_tasks(
         self,
@@ -228,6 +268,7 @@ class TaskService:
         task_id: int,
         data: TaskUpdate,
         current_user: User,
+        background_tasks: BackgroundTasks,
     ) -> TaskResponse:
         """Update a task in an active project."""
 
@@ -244,11 +285,14 @@ class TaskService:
 
         update_data = data.model_dump(exclude_unset=True)
 
+        new_assignee: User | None = None
         if "assignee_id" in update_data and update_data["assignee_id"] is not None:
-            await self._validate_assignee(
+            assignee = await self._validate_assignee(
                 workspace,
                 update_data["assignee_id"],
             )
+            if update_data["assignee_id"] != task.assignee_id:
+                new_assignee = assignee
 
         updated_task = await self.task_repository.update_entity(
             task,
@@ -259,7 +303,15 @@ class TaskService:
             self.task_repository.session,
             task.project_id,
         )
-        return await self._get_task_response(updated_task.id)
+        response = await self._get_task_response(updated_task.id)
+        if new_assignee is not None:
+            await self._schedule_assignment_notification_after_commit(
+                background_tasks,
+                response,
+                project.name,
+                new_assignee,
+            )
+        return response
 
     async def delete_task(
         self,

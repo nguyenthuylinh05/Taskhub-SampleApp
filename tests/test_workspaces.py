@@ -349,6 +349,44 @@ def test_viewer_cannot_update_workspace(
     assert response.status_code == 403
 
 
+def test_editor_cannot_update_workspace(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    owner = register_user(client, cleanup_user)
+    editor = register_user(client, cleanup_user)
+
+    owner_token = login_user(client, owner)
+    editor_token = login_user(client, editor)
+
+    workspace = create_workspace(
+        client,
+        owner_token,
+        cleanup_workspace,
+    )
+    workspace_id = workspace["id"]
+
+    add_response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/members",
+        headers=auth_headers(owner_token),
+        json={
+            "user_id": editor["id"],
+            "role": "EDITOR",
+        },
+    )
+
+    assert add_response.status_code == 201
+
+    response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}",
+        headers=auth_headers(editor_token),
+        json={"name": "Changed By Editor"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_editor_cannot_manage_workspace_members(
     client: TestClient,
     cleanup_user: list[int],
@@ -684,3 +722,248 @@ def test_removing_member_unassigns_tasks_only_in_target_workspace(
     )
 
     assert unchanged_second_task["assignee_id"] == member_id
+
+
+def test_owner_can_change_member_role_between_editor_and_viewer(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    owner = register_user(client, cleanup_user)
+    member = register_user(client, cleanup_user)
+
+    owner_token = login_user(client, owner)
+    workspace = create_workspace(client, owner_token, cleanup_workspace)
+    workspace_id = workspace["id"]
+
+    add_response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/members",
+        headers=auth_headers(owner_token),
+        json={"user_id": member["id"], "role": "VIEWER"},
+    )
+    assert add_response.status_code == 201
+
+    promote_response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/members/{member['id']}",
+        headers=auth_headers(owner_token),
+        json={"role": "EDITOR"},
+    )
+    assert promote_response.status_code == 200
+    assert promote_response.json() == {
+        "user_id": member["id"],
+        "role": "EDITOR",
+    }
+
+    demote_response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/members/{member['id']}",
+        headers=auth_headers(owner_token),
+        json={"role": "VIEWER"},
+    )
+    assert demote_response.status_code == 200
+    assert demote_response.json() == {
+        "user_id": member["id"],
+        "role": "VIEWER",
+    }
+
+
+def test_admin_can_change_member_role(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+    promote_to_admin: object,
+) -> None:
+    from collections.abc import Callable
+
+    promote_admin = cast(Callable[[int], None], promote_to_admin)
+
+    owner = register_user(client, cleanup_user)
+    member = register_user(client, cleanup_user)
+    admin = register_user(client, cleanup_user)
+    promote_admin(admin["id"])
+
+    owner_token = login_user(client, owner)
+    admin_token = login_user(client, admin)
+
+    workspace = create_workspace(client, owner_token, cleanup_workspace)
+    workspace_id = workspace["id"]
+
+    add_response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/members",
+        headers=auth_headers(owner_token),
+        json={"user_id": member["id"], "role": "VIEWER"},
+    )
+    assert add_response.status_code == 201
+
+    response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/members/{member['id']}",
+        headers=auth_headers(admin_token),
+        json={"role": "EDITOR"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"user_id": member["id"], "role": "EDITOR"}
+
+
+def test_change_member_role_validation_and_permissions(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+    promote_to_admin: object,
+) -> None:
+    from collections.abc import Callable
+
+    promote_admin = cast(Callable[[int], None], promote_to_admin)
+
+    owner = register_user(client, cleanup_user)
+    editor = register_user(client, cleanup_user)
+    viewer = register_user(client, cleanup_user)
+    outsider = register_user(client, cleanup_user)
+    admin_member = register_user(client, cleanup_user)
+    promote_admin(admin_member["id"])
+
+    owner_token = login_user(client, owner)
+    editor_token = login_user(client, editor)
+    viewer_token = login_user(client, viewer)
+    outsider_token = login_user(client, outsider)
+    admin_member_token = login_user(client, admin_member)
+
+    workspace = create_workspace(client, owner_token, cleanup_workspace)
+    workspace_id = workspace["id"]
+
+    for user_id, role in (
+        (editor["id"], "EDITOR"),
+        (viewer["id"], "VIEWER"),
+        (admin_member["id"], "EDITOR"),
+    ):
+        add_response = client.post(
+            f"/api/v1/workspaces/{workspace_id}/members",
+            headers=auth_headers(owner_token),
+            json={"user_id": user_id, "role": role},
+        )
+        assert add_response.status_code == 201
+
+    # Non-owners cannot change member roles.
+    assert (
+        client.patch(
+            f"/api/v1/workspaces/{workspace_id}/members/{viewer['id']}",
+            headers=auth_headers(editor_token),
+            json={"role": "EDITOR"},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            f"/api/v1/workspaces/{workspace_id}/members/{editor['id']}",
+            headers=auth_headers(viewer_token),
+            json={"role": "VIEWER"},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            f"/api/v1/workspaces/{workspace_id}/members/{editor['id']}",
+            headers=auth_headers(outsider_token),
+            json={"role": "VIEWER"},
+        ).status_code
+        == 404
+    )
+
+    # Cannot assign OWNER role.
+    assert (
+        client.patch(
+            f"/api/v1/workspaces/{workspace_id}/members/{editor['id']}",
+            headers=auth_headers(owner_token),
+            json={"role": "OWNER"},
+        ).status_code
+        == 400
+    )
+
+    # Cannot change the workspace owner's role.
+    assert (
+        client.patch(
+            f"/api/v1/workspaces/{workspace_id}/members/{owner['id']}",
+            headers=auth_headers(owner_token),
+            json={"role": "EDITOR"},
+        ).status_code
+        == 400
+    )
+
+    # Cannot change your own workspace role (e.g., admin who is also a member).
+    assert (
+        client.patch(
+            f"/api/v1/workspaces/{workspace_id}/members/{admin_member['id']}",
+            headers=auth_headers(admin_member_token),
+            json={"role": "VIEWER"},
+        ).status_code
+        == 400
+    )
+
+    # Non-existent member returns 404.
+    assert (
+        client.patch(
+            f"/api/v1/workspaces/{workspace_id}/members/999999",
+            headers=auth_headers(owner_token),
+            json={"role": "EDITOR"},
+        ).status_code
+        == 404
+    )
+
+
+def test_demoting_editor_to_viewer_preserves_existing_task_assignee_but_blocks_new(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    owner = register_user(client, cleanup_user)
+    member = register_user(client, cleanup_user)
+
+    owner_token = login_user(client, owner)
+    workspace = create_workspace(client, owner_token, cleanup_workspace)
+    workspace_id = workspace["id"]
+
+    add_response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/members",
+        headers=auth_headers(owner_token),
+        json={"user_id": member["id"], "role": "EDITOR"},
+    )
+    assert add_response.status_code == 201
+
+    project_response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/projects",
+        headers=auth_headers(owner_token),
+        json={"name": "Role Demotion Project"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    assigned_task = client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=auth_headers(owner_token),
+        json={"title": "Existing assigned task", "assignee_id": member["id"]},
+    )
+    assert assigned_task.status_code == 201
+    assert assigned_task.json()["assignee_id"] == member["id"]
+
+    # Demote EDITOR to VIEWER.
+    demote_response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/members/{member['id']}",
+        headers=auth_headers(owner_token),
+        json={"role": "VIEWER"},
+    )
+    assert demote_response.status_code == 200
+    assert demote_response.json()["role"] == "VIEWER"
+
+    # Existing task keeps its assignee_id.
+    tasks_after = client.get(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=auth_headers(owner_token),
+    )
+    assert tasks_after.status_code == 200
+    assert tasks_after.json()["items"][0]["assignee_id"] == member["id"]
+
+    # VIEWER cannot be assigned to a new task.
+    new_task = client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=auth_headers(owner_token),
+        json={"title": "Blocked new assignment", "assignee_id": member["id"]},
+    )
+    assert new_task.status_code == 400

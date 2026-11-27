@@ -1,5 +1,6 @@
 """Authentication business logic."""
 
+import logging
 from typing import Any
 
 import jwt
@@ -38,6 +39,8 @@ from app.schemas.auth import (
 )
 from app.schemas.user import ChangePasswordRequest
 
+logger = logging.getLogger("taskhub.auth")
+
 
 class AuthService:
     """Service for authentication business logic."""
@@ -56,7 +59,7 @@ class AuthService:
     async def register(self, data: RegisterRequest) -> User:
         """Register a new user."""
 
-        existing_user = await self.user_repository.get_by_email(str(data.email))
+        existing_user = await self.user_repository.get_by_email(data.email)
 
         if existing_user is not None:
             raise EmailAlreadyRegistered()
@@ -66,7 +69,7 @@ class AuthService:
         try:
             user = await self.user_repository.create(
                 {
-                    "email": str(data.email),
+                    "email": data.email,
                     "full_name": data.full_name,
                     "hashed_password": hashed_password,
                 }
@@ -100,8 +103,6 @@ class AuthService:
                 "New password must be different from current password"
             )
 
-        await revoke_all_refresh_tokens(str(user.id))
-
         new_hashed_password = await hash_password(data.new_password)
 
         try:
@@ -115,10 +116,18 @@ class AuthService:
             await self.user_repository.session.rollback()
             raise
 
+        try:
+            await revoke_all_refresh_tokens(str(user.id))
+        except Exception:
+            logger.exception(
+                "Failed to revoke refresh tokens after password change for user_id=%s",
+                user.id,
+            )
+
     async def login(self, data: LoginRequest) -> TokenResponse:
         """Authenticate a user and issue JWT tokens."""
 
-        user = await self.user_repository.get_by_email(str(data.email))
+        user = await self.user_repository.get_by_email(data.email)
 
         if user is None:
             await verify_password(data.password, DUMMY_PASSWORD_HASH)

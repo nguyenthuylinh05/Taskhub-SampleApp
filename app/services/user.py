@@ -1,4 +1,4 @@
-﻿"""Business logic for user management."""
+"""Business logic for user management."""
 
 from typing import Any, NoReturn
 

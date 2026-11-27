@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 from app.core.constants import COMMENT_CONTENT_MAX_LENGTH
-from app.core.messages import COMMENT_NOT_FOUND, PROJECT_ARCHIVED
+from app.core.messages import COMMENT_NOT_FOUND, PROJECT_ARCHIVED, TASK_NOT_FOUND
 from app.models.enums import WorkspaceRole
 from app.schemas.comment import CommentCreate
 from fastapi.testclient import TestClient
@@ -136,13 +136,35 @@ def test_comments_reject_missing_and_inaccessible_resources(
     )
     assert missing_comment.status_code == 404
     assert missing_comment.json()["detail"] == COMMENT_NOT_FOUND
-    assert (
-        client.get(
-            f"/api/v1/tasks/{task_id}/comments",
-            headers=outsider_headers,
-        ).status_code
-        == 404
+    inaccessible_list = client.get(
+        f"/api/v1/tasks/{task_id}/comments",
+        headers=outsider_headers,
     )
+    assert inaccessible_list.status_code == 404
+    assert inaccessible_list.json()["detail"] == TASK_NOT_FOUND
+
+    created_comment = client.post(
+        f"/api/v1/tasks/{task_id}/comments",
+        headers=owner_headers,
+        json={"content": "Private comment"},
+    )
+    assert created_comment.status_code == 201
+    private_comment_id = created_comment.json()["id"]
+
+    inaccessible_patch = client.patch(
+        f"/api/v1/comments/{private_comment_id}",
+        headers=outsider_headers,
+        json={"content": "Tamper"},
+    )
+    assert inaccessible_patch.status_code == 404
+    assert inaccessible_patch.json()["detail"] == COMMENT_NOT_FOUND
+
+    inaccessible_delete = client.delete(
+        f"/api/v1/comments/{private_comment_id}",
+        headers=outsider_headers,
+    )
+    assert inaccessible_delete.status_code == 404
+    assert inaccessible_delete.json()["detail"] == COMMENT_NOT_FOUND
 
 
 def test_comment_writes_follow_workspace_roles(
@@ -548,12 +570,13 @@ def test_comment_update_validates_payload_and_preserves_system_fields(
         ).status_code
         == 404
     )
-    for payload in (
+    invalid_payloads: tuple[dict[str, object], ...] = (
         {"content": ""},
         {"content": " \t "},
         {"content": "x" * (COMMENT_CONTENT_MAX_LENGTH + 1)},
         {},
-    ):
+    )
+    for payload in invalid_payloads:
         assert (
             client.patch(comment_url, headers=headers, json=payload).status_code == 422
         )

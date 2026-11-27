@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Response, status
 
 from app.api.dependencies import CurrentUserDep
+from app.api.openapi import PROTECTED_API_RESPONSES
 from app.core.dependencies import LabelServiceDep, PaginationDep
 from app.schemas.label import (
     LabelCreate,
@@ -11,7 +12,7 @@ from app.schemas.label import (
     LabelUpdate,
 )
 
-router = APIRouter(tags=["Labels"])
+router = APIRouter(tags=["Labels"], responses=PROTECTED_API_RESPONSES)
 
 
 @router.post(
@@ -33,6 +34,7 @@ async def create_label(
     current_user: CurrentUserDep,
     service: LabelServiceDep,
 ) -> LabelResponse:
+    """Create a label in a project. Requires OWNER or EDITOR access."""
     return await service.create_label(project_id, data, current_user)
 
 
@@ -52,6 +54,7 @@ async def get_labels(
     service: LabelServiceDep,
     pagination: PaginationDep,
 ) -> LabelListResponse:
+    """List project labels with pagination."""
     return await service.get_labels(project_id, current_user, pagination)
 
 
@@ -69,6 +72,7 @@ async def get_label(
     current_user: CurrentUserDep,
     service: LabelServiceDep,
 ) -> LabelResponse:
+    """Get a label visible in an accessible workspace."""
     return await service.get_label(label_id, current_user)
 
 
@@ -91,6 +95,7 @@ async def update_label(
     current_user: CurrentUserDep,
     service: LabelServiceDep,
 ) -> LabelResponse:
+    """Update a label. Requires OWNER or EDITOR access."""
     return await service.update_label(label_id, data, current_user)
 
 
@@ -111,6 +116,7 @@ async def delete_label(
     current_user: CurrentUserDep,
     service: LabelServiceDep,
 ) -> Response:
+    """Delete a label. Requires OWNER or EDITOR access."""
     await service.delete_label(label_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -134,6 +140,7 @@ async def assign_label(
     current_user: CurrentUserDep,
     service: LabelServiceDep,
 ) -> Response:
+    """Assign a same-project label to a task."""
     await service.assign_label(task_id, label_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -158,5 +165,6 @@ async def remove_label(
     current_user: CurrentUserDep,
     service: LabelServiceDep,
 ) -> Response:
+    """Remove a same-project label from a task."""
     await service.remove_label(task_id, label_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

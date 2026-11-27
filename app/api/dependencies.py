@@ -24,7 +24,11 @@ from app.services.workspace_access import (
     resolve_workspace_access,
 )
 
-bearer_scheme = HTTPBearer()
+bearer_scheme = HTTPBearer(
+    scheme_name="BearerAuth",
+    bearerFormat="JWT",
+    description="Use an access token returned by the login or refresh endpoint.",
+)
 
 
 async def get_current_user(

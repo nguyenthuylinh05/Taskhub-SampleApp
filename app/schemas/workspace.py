@@ -56,6 +56,10 @@ class WorkspaceMemberAdd(BaseSchema):
     role: WorkspaceRole = WorkspaceRole.VIEWER
 
 
+class WorkspaceMemberRoleUpdate(BaseSchema):
+    role: WorkspaceRole
+
+
 class WorkspaceMemberResponse(BaseSchema):
     user_id: PositiveInt
     role: WorkspaceRole

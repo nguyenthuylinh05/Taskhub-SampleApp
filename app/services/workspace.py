@@ -6,10 +6,12 @@ from app.core.exceptions import (
 )
 from app.core.messages import (
     USER_NOT_FOUND,
+    WORKSPACE_CANNOT_CHANGE_OWN_ROLE,
     WORKSPACE_MEMBER_ALREADY_EXISTS,
     WORKSPACE_MEMBER_NOT_FOUND,
     WORKSPACE_OWNER_CANNOT_BE_MEMBER,
     WORKSPACE_OWNER_CANNOT_BE_REMOVED,
+    WORKSPACE_OWNER_ROLE_CANNOT_BE_CHANGED,
     WORKSPACE_OWNER_ROLE_INVALID,
 )
 from app.models import User, Workspace, WorkspaceRole
@@ -185,3 +187,38 @@ class WorkspaceService:
                 self.workspace_repository.session,
                 project_id,
             )
+
+    async def change_member_role(
+        self,
+        workspace: Workspace,
+        current_user: User,
+        user_id: int,
+        role: WorkspaceRole,
+    ) -> WorkspaceMemberResponse:
+        if role == WorkspaceRole.OWNER:
+            raise InvalidOperation(WORKSPACE_OWNER_ROLE_INVALID)
+
+        if workspace.owner_id == user_id:
+            raise InvalidOperation(WORKSPACE_OWNER_ROLE_CANNOT_BE_CHANGED)
+
+        if current_user.id == user_id:
+            raise InvalidOperation(WORKSPACE_CANNOT_CHANGE_OWN_ROLE)
+
+        existing_role = await self.workspace_repository.get_member(
+            workspace.id,
+            user_id,
+        )
+
+        if existing_role is None:
+            raise NotFoundException(WORKSPACE_MEMBER_NOT_FOUND)
+
+        updated = await self.workspace_repository.update_member_role(
+            workspace.id,
+            user_id,
+            role,
+        )
+
+        if not updated:
+            raise NotFoundException(WORKSPACE_MEMBER_NOT_FOUND)
+
+        return WorkspaceMemberResponse(user_id=user_id, role=role)
