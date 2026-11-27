@@ -14,7 +14,7 @@ from alembic.config import Config
 from app.core.config import settings
 from app.core.database import get_db_session
 from app.main import app
-from app.models import User, UserRole, Workspace
+from app.models import User, UserRole, Workspace, WorkspaceRole, workspace_members
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import (
@@ -108,6 +108,30 @@ def create_test_project(
 
 
 @pytest.fixture
+def create_test_task(
+    client: TestClient,
+) -> Callable[[dict[str, str], int, str], int]:
+    """Create a task through the public API."""
+
+    def _create_test_task(
+        headers: dict[str, str],
+        project_id: int,
+        title: str,
+    ) -> int:
+        response = client.post(
+            f"/api/v1/projects/{project_id}/tasks",
+            headers=headers,
+            json={"title": title},
+        )
+        assert response.status_code == 201
+        task_id = response.json()["id"]
+        assert isinstance(task_id, int)
+        return task_id
+
+    return _create_test_task
+
+
+@pytest.fixture
 def add_workspace_member(
     client: TestClient,
 ) -> Callable[[dict[str, str], int, int, str], None]:
@@ -127,6 +151,40 @@ def add_workspace_member(
         assert response.status_code == 201
 
     return _add_workspace_member
+
+
+@pytest.fixture
+def set_workspace_member_role() -> Callable[[int, int, WorkspaceRole], None]:
+    """Update a test user's workspace role in the dedicated test database."""
+
+    def _set_workspace_member_role(
+        workspace_id: int,
+        user_id: int,
+        role: WorkspaceRole,
+    ) -> None:
+        async def update_role() -> None:
+            engine = create_async_engine(
+                settings.TEST_DATABASE_URL,
+                poolclass=NullPool,
+            )
+            try:
+                async with engine.begin() as connection:
+                    result = await connection.execute(
+                        update(workspace_members)
+                        .where(
+                            workspace_members.c.workspace_id == workspace_id,
+                            workspace_members.c.user_id == user_id,
+                        )
+                        .values(role=role)
+                    )
+                    if result.rowcount != 1:
+                        raise AssertionError("Workspace membership was not updated")
+            finally:
+                await engine.dispose()
+
+        anyio.run(update_role)
+
+    return _set_workspace_member_role
 
 
 @pytest.fixture

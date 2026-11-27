@@ -3,10 +3,8 @@
 from app.core.exceptions import (
     InvalidOperation,
     NotFoundException,
-    PermissionDenied,
 )
 from app.core.messages import (
-    PROJECT_ARCHIVED,
     PROJECT_NOT_FOUND,
     TASK_ASSIGNEE_MUST_HAVE_WRITE_ACCESS,
     TASK_ASSIGNEE_NOT_IN_WORKSPACE,
@@ -14,7 +12,6 @@ from app.core.messages import (
     USER_NOT_FOUND,
 )
 from app.models.enums import (
-    ProjectStatus,
     TaskPriority,
     TaskStatus,
 )
@@ -29,8 +26,9 @@ from app.repositories.workspace import WorkspaceRepository
 from app.schemas.pagination import Pagination
 from app.schemas.task import TaskCreate, TaskListResponse, TaskResponse, TaskUpdate
 from app.services.workspace_access import (
+    ensure_project_active,
     has_workspace_write_access,
-    resolve_workspace_access,
+    resolve_project_access,
 )
 
 
@@ -49,6 +47,12 @@ class TaskService:
         self.workspace_repository = workspace_repository
         self.user_repository = user_repository
 
+    async def _get_task_response(self, task_id: int) -> TaskResponse:
+        task = await self.task_repository.get_by_id_with_labels(task_id)
+        if task is None:
+            raise NotFoundException(TASK_NOT_FOUND)
+        return TaskResponse.model_validate(task)
+
     async def _get_project_and_workspace(
         self,
         project_id: int,
@@ -57,31 +61,15 @@ class TaskService:
     ) -> tuple[Project, Workspace]:
         """Get a project and resolve the current user's workspace access."""
 
-        project = await self.project_repository.get_by_id(project_id)
-
-        if project is None:
-            raise NotFoundException(PROJECT_NOT_FOUND)
-
-        try:
-            access = await resolve_workspace_access(
-                project.workspace_id,
-                current_user,
-                self.workspace_repository,
-            )
-        except NotFoundException:
-            raise NotFoundException(PROJECT_NOT_FOUND) from None
-
-        if require_editor and not has_workspace_write_access(access.role):
-            raise PermissionDenied()
-
+        project, access = await resolve_project_access(
+            project_id,
+            current_user,
+            self.project_repository,
+            self.workspace_repository,
+            require_write=require_editor,
+            inaccessible_message=PROJECT_NOT_FOUND,
+        )
         return project, access.workspace
-
-    @staticmethod
-    def _ensure_project_active(project: Project) -> None:
-        """Prevent task modifications in archived projects."""
-
-        if project.status == ProjectStatus.ARCHIVED:
-            raise InvalidOperation(PROJECT_ARCHIVED)
 
     async def _validate_assignee(
         self,
@@ -138,7 +126,7 @@ class TaskService:
             current_user,
             require_editor=True,
         )
-        self._ensure_project_active(project)
+        ensure_project_active(project)
 
         if data.assignee_id is not None:
             await self._validate_assignee(workspace, data.assignee_id)
@@ -151,7 +139,7 @@ class TaskService:
             }
         )
 
-        return TaskResponse.model_validate(task)
+        return await self._get_task_response(task.id)
 
     async def get_tasks(
         self,
@@ -198,7 +186,7 @@ class TaskService:
             task,
             current_user,
         )
-        self._ensure_project_active(project)
+        ensure_project_active(project)
 
         update_data = data.model_dump(exclude_unset=True)
 
@@ -213,7 +201,7 @@ class TaskService:
             update_data,
         )
 
-        return TaskResponse.model_validate(updated_task)
+        return await self._get_task_response(updated_task.id)
 
     async def delete_task(
         self,
@@ -231,6 +219,6 @@ class TaskService:
             task,
             current_user,
         )
-        self._ensure_project_active(project)
+        ensure_project_active(project)
 
         await self.task_repository.delete_entity(task)
