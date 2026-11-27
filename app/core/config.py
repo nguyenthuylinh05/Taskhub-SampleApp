@@ -3,6 +3,7 @@
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
@@ -14,6 +15,13 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     API_V1_PREFIX: str = "/api/v1"
 
+    POSTGRES_DB: str = "taskhub_db"
+    POSTGRES_USER: str = "taskhub_user"
+    POSTGRES_PASSWORD: str
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_TEST_DB: str = "taskhub_test_db"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -21,9 +29,35 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @property
+    def DATABASE_URL(self) -> URL:
+        """Build the asynchronous PostgreSQL connection URL."""
+
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_HOST,
+            port=self.POSTGRES_PORT,
+            database=self.POSTGRES_DB,
+        )
+
+    @property
+    def TEST_DATABASE_URL(self) -> URL:
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_HOST,
+            port=self.POSTGRES_PORT,
+            database=self.POSTGRES_TEST_DB,
+        )
+
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return cached application settings."""
+    return Settings()  # type: ignore[call-arg]
 
-    return Settings()
+
+settings = get_settings()
+DATABASE_URL = settings.DATABASE_URL

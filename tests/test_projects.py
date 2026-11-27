@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from uuid import uuid4
 
 import pytest
 from app.main import app
@@ -93,7 +94,6 @@ def test_create_project_validation(client: TestClient) -> None:
 
 
 def test_get_nonexistent_project(client: TestClient) -> None:
-    from uuid import uuid4
 
     response = client.get(f"/api/v1/projects/{uuid4()}")
 
@@ -101,7 +101,6 @@ def test_get_nonexistent_project(client: TestClient) -> None:
 
 
 def test_update_nonexistent_project(client: TestClient) -> None:
-    from uuid import uuid4
 
     response = client.patch(
         f"/api/v1/projects/{uuid4()}",
@@ -113,7 +112,6 @@ def test_update_nonexistent_project(client: TestClient) -> None:
 
 
 def test_delete_nonexistent_project(client: TestClient) -> None:
-    from uuid import uuid4
 
     response = client.delete(f"/api/v1/projects/{uuid4()}")
 

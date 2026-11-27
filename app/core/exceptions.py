@@ -24,3 +24,23 @@ class NotFoundException(AppException):
             message=message,
             status_code=status.HTTP_404_NOT_FOUND,
         )
+
+
+class ConflictError(AppException):
+    """Exception raised when a resource conflicts with existing data."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class ValidationException(AppException):
+    """Exception raised when business validation fails."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
