@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Response, status
 
 from app.api.dependencies import CurrentUserDep
+from app.api.openapi import PROTECTED_API_RESPONSES
 from app.core.dependencies import CommentServiceDep, PaginationDep
 from app.schemas.comment import (
     CommentCreate,
@@ -11,7 +12,7 @@ from app.schemas.comment import (
     CommentUpdate,
 )
 
-router = APIRouter(tags=["Comments"])
+router = APIRouter(tags=["Comments"], responses=PROTECTED_API_RESPONSES)
 
 
 @router.post(
@@ -82,7 +83,11 @@ async def update_comment(
     "/comments/{comment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a comment",
-    description=("Delete a comment. Requires OWNER or EDITOR access to its workspace."),
+    description=(
+        "Delete your own comment while you retain workspace access, or delete any "
+        "comment as a workspace OWNER or system ADMIN. EDITOR and VIEWER users "
+        "cannot delete another user's comment."
+    ),
     responses={
         400: {"description": "Comment belongs to an archived project"},
         401: {"description": "Not authenticated"},

@@ -2,9 +2,10 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Query, Response, status
 
 from app.api.dependencies import CurrentUserDep
+from app.api.openapi import PROTECTED_API_RESPONSES
 from app.core.constants import TASK_SEARCH_MAX_LENGTH
 from app.core.dependencies import PaginationDep, TaskServiceDep
 from app.models.enums import TaskPriority, TaskStatus
@@ -15,7 +16,7 @@ from app.schemas.task import (
     TaskUpdate,
 )
 
-router = APIRouter(tags=["Tasks"])
+router = APIRouter(tags=["Tasks"], responses=PROTECTED_API_RESPONSES)
 
 
 @router.post(
@@ -23,6 +24,11 @@ router = APIRouter(tags=["Tasks"])
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a task in a project",
+    description=(
+        "Create a task in an active project. If an assignee is supplied and "
+        "email notifications are enabled, an assignment email is queued after "
+        "the database commit succeeds."
+    ),
     responses={
         400: {
             "description": ("Task assignment or project state violates business rules"),
@@ -37,8 +43,14 @@ async def create_task(
     data: TaskCreate,
     current_user: CurrentUserDep,
     service: TaskServiceDep,
+    background_tasks: BackgroundTasks,
 ) -> TaskResponse:
-    return await service.create_task(project_id, data, current_user)
+    return await service.create_task(
+        project_id,
+        data,
+        current_user,
+        background_tasks,
+    )
 
 
 @router.get(
@@ -57,11 +69,16 @@ async def get_tasks(
     pagination: PaginationDep,
     task_status: Annotated[
         list[TaskStatus] | None,
-        Query(alias="status"),
+        Query(
+            alias="status",
+            description="Repeat this parameter to match any of several task statuses.",
+        ),
     ] = None,
     priority: Annotated[
         list[TaskPriority] | None,
-        Query(),
+        Query(
+            description="Repeat this parameter to match any of several priorities."
+        ),
     ] = None,
     assignee_id: Annotated[int | None, Query(ge=1)] = None,
     search: Annotated[
@@ -73,6 +90,7 @@ async def get_tasks(
         ),
     ] = None,
 ) -> TaskListResponse:
+    """List project tasks with optional filters, search, and pagination."""
     return await service.get_tasks(
         project_id=project_id,
         current_user=current_user,
@@ -88,6 +106,10 @@ async def get_tasks(
     "/tasks/{task_id}",
     response_model=TaskResponse,
     summary="Update a task",
+    description=(
+        "Update task fields. Assigning a different workspace member can queue an "
+        "email notification when notifications are enabled."
+    ),
     responses={
         400: {"description": "Task update violates business rules"},
         401: {"description": "Not authenticated"},
@@ -100,8 +122,14 @@ async def update_task(
     data: TaskUpdate,
     current_user: CurrentUserDep,
     service: TaskServiceDep,
+    background_tasks: BackgroundTasks,
 ) -> TaskResponse:
-    return await service.update_task(task_id, data, current_user)
+    return await service.update_task(
+        task_id,
+        data,
+        current_user,
+        background_tasks,
+    )
 
 
 @router.delete(
@@ -120,5 +148,6 @@ async def delete_task(
     current_user: CurrentUserDep,
     service: TaskServiceDep,
 ) -> Response:
+    """Delete a task in an active project."""
     await service.delete_task(task_id, current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

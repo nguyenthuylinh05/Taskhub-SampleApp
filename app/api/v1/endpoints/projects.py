@@ -7,12 +7,14 @@ from app.api.dependencies import (
     require_workspace_editor,
     require_workspace_member,
 )
+from app.api.openapi import PROTECTED_API_RESPONSES
 from app.core.dependencies import ProjectServiceDep
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/projects",
     tags=["Projects"],
+    responses=PROTECTED_API_RESPONSES,
 )
 
 WorkspaceMemberDep = Annotated[
@@ -42,6 +44,7 @@ async def create_project(
     service: ProjectServiceDep,
     access: WorkspaceEditorDep,
 ) -> ProjectResponse:
+    """Create a project in the workspace. Requires OWNER or EDITOR access."""
     return await service.create_project(access.workspace.id, data)
 
 
@@ -58,6 +61,7 @@ async def get_projects(
     service: ProjectServiceDep,
     access: WorkspaceMemberDep,
 ) -> list[ProjectResponse]:
+    """List projects in the accessible workspace."""
     return await service.get_projects(access.workspace.id)
 
 
@@ -75,6 +79,7 @@ async def get_project(
     service: ProjectServiceDep,
     access: WorkspaceMemberDep,
 ) -> ProjectResponse:
+    """Get project details within the accessible workspace."""
     return await service.get_project(access.workspace.id, project_id)
 
 
@@ -94,6 +99,7 @@ async def update_project(
     service: ProjectServiceDep,
     access: WorkspaceEditorDep,
 ) -> ProjectResponse:
+    """Update a project, including its ACTIVE or ARCHIVED status."""
     return await service.update_project(
         access.workspace.id,
         project_id,
@@ -116,5 +122,6 @@ async def delete_project(
     service: ProjectServiceDep,
     access: WorkspaceEditorDep,
 ) -> Response:
+    """Delete a project in the workspace. Requires OWNER or EDITOR access."""
     await service.delete_project(access.workspace.id, project_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

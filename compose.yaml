@@ -1,12 +1,41 @@
+x-taskhub-environment: &taskhub-environment
+  APP_NAME: ${APP_NAME:-TaskHub}
+  APP_VERSION: ${APP_VERSION:-0.1.0}
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  DEBUG: ${TASKHUB_DEBUG:-false}
+  API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  POSTGRES_DB: ${POSTGRES_DB:-taskhub_db}
+  POSTGRES_USER: ${POSTGRES_USER:-taskhub_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+  POSTGRES_HOST: db
+  POSTGRES_PORT: 5432
+  POSTGRES_TEST_DB: ${POSTGRES_TEST_DB:-taskhub_test_db}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+  REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_DB: ${REDIS_DB:-0}
+  REDIS_TASK_CACHE_TTL_SECONDS: ${REDIS_TASK_CACHE_TTL_SECONDS:-60}
+  EMAIL_NOTIFICATIONS_ENABLED: ${EMAIL_NOTIFICATIONS_ENABLED:-false}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-TaskHub <no-reply@localhost>}
+  SMTP_USE_STARTTLS: ${SMTP_USE_STARTTLS:-true}
+  SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
+
 services:
   db:
     image: postgres:16
-    container_name: taskhub-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-taskhub_db}
+      POSTGRES_USER: ${POSTGRES_USER:-taskhub_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -14,7 +43,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
       interval: 5s
       timeout: 5s
       retries: 10
@@ -22,21 +51,57 @@ services:
 
   redis:
     image: redis:7
-    container_name: taskhub-redis
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    environment: *taskhub-environment
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment: *taskhub-environment
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - uv
+        - run
+        - --no-sync
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   postgres_data:

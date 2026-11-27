@@ -430,20 +430,72 @@ def test_change_password_success(
     assert old_password_response.status_code == 401
 
 
-def test_change_password_rolls_back_when_redis_fails(
+def test_change_password_commits_and_logs_when_redis_fails(
     client: TestClient,
     cleanup_user: list[int],
     mock_redis: dict[str, AsyncMock],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Password change must roll back if Redis revocation fails."""
+    """Password change must commit first and log without failing if Redis fails."""
 
     user_data = register_user(client, cleanup_user)
     access_token = login_user(client, user_data)
 
-    # Simulate Redis failure after the password has been flushed.
     mock_redis["revoke_all"].side_effect = RuntimeError("Redis unavailable")
 
-    with pytest.raises(RuntimeError, match="Redis unavailable"):
+    with caplog.at_level("ERROR", logger="taskhub.auth"):
+        response = client.post(
+            "/api/v1/users/me/change-password",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "current_password": "TestPassword123",
+                "new_password": "NewPassword123",
+            },
+        )
+
+    assert response.status_code == 204
+    mock_redis["revoke_all"].assert_awaited_once_with(str(user_data["id"]))
+    assert "Failed to revoke refresh tokens after password change" in caplog.text
+
+    # The new password must be committed in PostgreSQL.
+    new_password_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": user_data["email"],
+            "password": "NewPassword123",
+        },
+    )
+    assert new_password_response.status_code == 200
+
+    # The old password must no longer work.
+    old_password_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": user_data["email"],
+            "password": "TestPassword123",
+        },
+    )
+    assert old_password_response.status_code == 401
+
+
+def test_change_password_does_not_revoke_tokens_when_db_commit_fails(
+    client: TestClient,
+    cleanup_user: list[int],
+    mock_redis: dict[str, AsyncMock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refresh tokens must not be revoked if the DB commit fails."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    user_data = register_user(client, cleanup_user)
+    access_token = login_user(client, user_data)
+
+    async def failing_commit(self: AsyncSession) -> None:
+        raise RuntimeError("DB commit failed")
+
+    monkeypatch.setattr(AsyncSession, "commit", failing_commit)
+
+    with pytest.raises(RuntimeError, match="DB commit failed"):
         client.post(
             "/api/v1/users/me/change-password",
             headers={"Authorization": f"Bearer {access_token}"},
@@ -453,9 +505,11 @@ def test_change_password_rolls_back_when_redis_fails(
             },
         )
 
-    mock_redis["revoke_all"].assert_awaited_once_with(str(user_data["id"]))
+    mock_redis["revoke_all"].assert_not_awaited()
 
-    # The old password must remain valid because the transaction rolled back.
+    monkeypatch.undo()
+
+    # The old password must remain valid because the DB transaction rolled back.
     old_password_response = client.post(
         "/api/v1/auth/login",
         json={
@@ -463,19 +517,7 @@ def test_change_password_rolls_back_when_redis_fails(
             "password": "TestPassword123",
         },
     )
-
     assert old_password_response.status_code == 200
-
-    # The new password must not have been committed.
-    new_password_response = client.post(
-        "/api/v1/auth/login",
-        json={
-            "email": user_data["email"],
-            "password": "NewPassword123",
-        },
-    )
-
-    assert new_password_response.status_code == 401
 
 
 def test_old_password_cannot_login_after_password_change(

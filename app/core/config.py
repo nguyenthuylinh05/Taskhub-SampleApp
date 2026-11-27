@@ -40,6 +40,14 @@ class Settings(BaseSettings):
             return value.upper()
         return value
 
+    @field_validator("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", mode="before")
+    @classmethod
+    def normalize_empty_smtp_values(cls, value: object) -> object:
+        """Treat blank optional SMTP environment variables as unset."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     # PostgreSQL
     POSTGRES_DB: str = "taskhub_db"
     POSTGRES_USER: str = "taskhub_user"
@@ -60,6 +68,16 @@ class Settings(BaseSettings):
     REDIS_DB: int = Field(default=0, ge=0)
     REDIS_TASK_CACHE_TTL_SECONDS: int = Field(default=60, gt=0)
 
+    # Assignment email notifications. SMTP is optional for local development.
+    EMAIL_NOTIFICATIONS_ENABLED: bool = False
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = Field(default=587, gt=0, le=65535)
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: SecretStr | None = None
+    SMTP_SENDER_EMAIL: str = "TaskHub <no-reply@localhost>"
+    SMTP_USE_STARTTLS: bool = True
+    SMTP_USE_SSL: bool = False
+
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":
         """Validate security-sensitive application settings."""
@@ -68,6 +86,16 @@ class Settings(BaseSettings):
 
         if len(self.JWT_SECRET_KEY.get_secret_value()) < 32:
             raise ValueError("JWT_SECRET_KEY must contain at least 32 characters")
+
+        if self.SMTP_USE_STARTTLS and self.SMTP_USE_SSL:
+            raise ValueError(
+                "SMTP_USE_STARTTLS and SMTP_USE_SSL cannot both be enabled"
+            )
+
+        if (self.SMTP_USERNAME is None) != (self.SMTP_PASSWORD is None):
+            raise ValueError(
+                "SMTP_USERNAME and SMTP_PASSWORD must be configured together"
+            )
 
         return self
 
@@ -130,3 +158,11 @@ REDIS_PORT = settings.REDIS_PORT
 REDIS_DB = settings.REDIS_DB
 REDIS_URL = settings.REDIS_URL
 REDIS_TASK_CACHE_TTL_SECONDS = settings.REDIS_TASK_CACHE_TTL_SECONDS
+EMAIL_NOTIFICATIONS_ENABLED = settings.EMAIL_NOTIFICATIONS_ENABLED
+SMTP_HOST = settings.SMTP_HOST
+SMTP_PORT = settings.SMTP_PORT
+SMTP_USERNAME = settings.SMTP_USERNAME
+SMTP_PASSWORD = settings.SMTP_PASSWORD
+SMTP_SENDER_EMAIL = settings.SMTP_SENDER_EMAIL
+SMTP_USE_STARTTLS = settings.SMTP_USE_STARTTLS
+SMTP_USE_SSL = settings.SMTP_USE_SSL

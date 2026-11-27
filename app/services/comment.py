@@ -1,7 +1,7 @@
 """Business logic for task comments."""
 
 from app.core.exceptions import NotFoundException, PermissionDenied
-from app.core.messages import COMMENT_NOT_FOUND, PROJECT_NOT_FOUND, TASK_NOT_FOUND
+from app.core.messages import COMMENT_NOT_FOUND, TASK_NOT_FOUND
 from app.models import Project, User
 from app.models.enums import WorkspaceRole
 from app.repositories.comment import CommentRepository
@@ -42,10 +42,11 @@ class CommentService:
         task_id: int,
         current_user: User,
         require_editor: bool = False,
+        inaccessible_message: str = TASK_NOT_FOUND,
     ) -> tuple[int, Project, WorkspaceAccess]:
         task = await self.task_repository.get_by_id(task_id)
         if task is None:
-            raise NotFoundException(TASK_NOT_FOUND)
+            raise NotFoundException(inaccessible_message)
 
         project, access = await resolve_project_access(
             task.project_id,
@@ -53,7 +54,8 @@ class CommentService:
             self.project_repository,
             self.workspace_repository,
             require_write=require_editor,
-            not_found_message=PROJECT_NOT_FOUND,
+            not_found_message=inaccessible_message,
+            inaccessible_message=inaccessible_message,
         )
         return task.id, project, access
 
@@ -112,6 +114,7 @@ class CommentService:
         _, project, _ = await self._get_task_and_authorize(
             comment.task_id,
             current_user,
+            inaccessible_message=COMMENT_NOT_FOUND,
         )
         ensure_project_active(project)
         if comment.author_id != current_user.id:
@@ -135,6 +138,7 @@ class CommentService:
         _, project, access = await self._get_task_and_authorize(
             comment.task_id,
             current_user,
+            inaccessible_message=COMMENT_NOT_FOUND,
         )
         if comment.author_id != current_user.id and access.role != WorkspaceRole.OWNER:
             raise PermissionDenied()

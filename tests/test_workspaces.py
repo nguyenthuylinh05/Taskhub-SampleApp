@@ -349,6 +349,44 @@ def test_viewer_cannot_update_workspace(
     assert response.status_code == 403
 
 
+def test_editor_cannot_update_workspace(
+    client: TestClient,
+    cleanup_user: list[int],
+    cleanup_workspace: list[int],
+) -> None:
+    owner = register_user(client, cleanup_user)
+    editor = register_user(client, cleanup_user)
+
+    owner_token = login_user(client, owner)
+    editor_token = login_user(client, editor)
+
+    workspace = create_workspace(
+        client,
+        owner_token,
+        cleanup_workspace,
+    )
+    workspace_id = workspace["id"]
+
+    add_response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/members",
+        headers=auth_headers(owner_token),
+        json={
+            "user_id": editor["id"],
+            "role": "EDITOR",
+        },
+    )
+
+    assert add_response.status_code == 201
+
+    response = client.patch(
+        f"/api/v1/workspaces/{workspace_id}",
+        headers=auth_headers(editor_token),
+        json={"name": "Changed By Editor"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_editor_cannot_manage_workspace_members(
     client: TestClient,
     cleanup_user: list[int],

@@ -40,9 +40,45 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title=f"{settings.APP_NAME} API",
-    description="Task Management API built with FastAPI",
+    title="TaskHub — Task Management API",
+    description=(
+        "TaskHub provides JWT-authenticated task management across workspaces. "
+        "Protected endpoints use a Bearer access token. Task lists support "
+        "filtering, pagination, search, and Redis caching. Assignment emails "
+        "are sent in the background when enabled and configured."
+    ),
     version=settings.APP_VERSION,
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {
+            "name": "Authentication",
+            "description": "Account registration and token lifecycle.",
+        },
+        {
+            "name": "Users",
+            "description": "Current profile and administrator user management.",
+        },
+        {
+            "name": "Workspaces",
+            "description": "Workspace and member management.",
+        },
+        {"name": "Projects", "description": "Projects scoped to a workspace."},
+        {
+            "name": "Tasks",
+            "description": "Task lifecycle, assignment, filtering, and pagination.",
+        },
+        {
+            "name": "Labels",
+            "description": "Project labels and task-label associations.",
+        },
+        {
+            "name": "Comments",
+            "description": "Task comments and author/owner permissions.",
+        },
+        {"name": "Health", "description": "Application health status."},
+    ],
     lifespan=lifespan,
 )
 
