@@ -1,20 +1,19 @@
-"""Application dependency providers."""
+from typing import Annotated
 
-from typing import Annotated, cast
-
-from fastapi import Depends, Request
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.repositories.comment import CommentRepository
 from app.repositories.label import LabelRepository
-from app.repositories.project import InMemoryProjectRepository
+from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.services.auth import AuthService
 from app.services.project import ProjectService
 from app.services.user import UserService
+from app.services.workspace import WorkspaceService
 
 DatabaseSessionDep = Annotated[
     AsyncSession,
@@ -23,18 +22,15 @@ DatabaseSessionDep = Annotated[
 
 
 def get_project_repository(
-    request: Request,
-) -> InMemoryProjectRepository:
-    """Get project repository from application state."""
+    session: DatabaseSessionDep,
+) -> ProjectRepository:
+    """Get project repository."""
 
-    return cast(
-        InMemoryProjectRepository,
-        request.app.state.project_repository,
-    )
+    return ProjectRepository(session)
 
 
 ProjectRepositoryDep = Annotated[
-    InMemoryProjectRepository,
+    ProjectRepository,
     Depends(get_project_repository),
 ]
 
@@ -67,24 +63,10 @@ UserRepositoryDep = Annotated[
 ]
 
 
-def get_auth_service(
-    repository: UserRepositoryDep,
-) -> AuthService:
-    """Provide an authentication service."""
-
-    return AuthService(repository)
-
-
-AuthServiceDep = Annotated[
-    AuthService,
-    Depends(get_auth_service),
-]
-
-
 def get_user_service(
     repository: UserRepositoryDep,
 ) -> UserService:
-    """Provide a user service."""
+    """Create user service with an injected repository."""
 
     return UserService(repository)
 
@@ -92,6 +74,20 @@ def get_user_service(
 UserServiceDep = Annotated[
     UserService,
     Depends(get_user_service),
+]
+
+
+def get_auth_service(
+    repository: UserRepositoryDep,
+) -> AuthService:
+    """Get authentication service."""
+
+    return AuthService(repository)
+
+
+AuthServiceDep = Annotated[
+    AuthService,
+    Depends(get_auth_service),
 ]
 
 
@@ -106,6 +102,24 @@ def get_workspace_repository(
 WorkspaceRepositoryDep = Annotated[
     WorkspaceRepository,
     Depends(get_workspace_repository),
+]
+
+
+def get_workspace_service(
+    workspace_repository: WorkspaceRepositoryDep,
+    user_repository: UserRepositoryDep,
+) -> WorkspaceService:
+    """Create workspace service with injected repositories."""
+
+    return WorkspaceService(
+        workspace_repository=workspace_repository,
+        user_repository=user_repository,
+    )
+
+
+WorkspaceServiceDep = Annotated[
+    WorkspaceService,
+    Depends(get_workspace_service),
 ]
 
 

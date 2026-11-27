@@ -1,50 +1,92 @@
-"""Business logic for user operations."""
+﻿"""Business logic for user management."""
+
+from typing import Any, NoReturn
 
 from sqlalchemy.exc import IntegrityError
 
 from app.core import messages
+from app.core.db_errors import is_email_unique_violation
 from app.core.exceptions import (
+    AppException,
+    CannotDeleteOwnAccount,
     ConflictError,
+    EmailAlreadyRegistered,
     NotFoundException,
-    ValidationException,
 )
 from app.core.security import hash_password
-from app.models import User
 from app.repositories.user import UserRepository
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import (
+    UserCreate,
+    UserListResponse,
+    UserProfileUpdate,
+    UserResponse,
+    UserUpdate,
+)
 
 
 class UserService:
-    """Service responsible for user business logic and transactions."""
+    """Business logic for user management."""
 
     def __init__(self, repository: UserRepository) -> None:
         self.repository = repository
-        self.session = repository.session
 
-    async def create_user(self, data: UserCreate) -> User:
-        """Create a user and commit the transaction."""
+    @staticmethod
+    def _validate_update_data(data: dict[str, Any]) -> None:
+        """Validate partial user updates."""
 
-        existing_user = await self.repository.get_by_email(str(data.email))
+        if not data:
+            raise AppException(
+                messages.UPDATE_FIELDS_REQUIRED,
+                status_code=422,
+            )
 
-        if existing_user is not None:
-            raise ConflictError(messages.USER_EMAIL_ALREADY_REGISTERED)
+        if any(value is None for value in data.values()):
+            raise AppException(
+                messages.UPDATE_FIELDS_CANNOT_BE_NULL,
+                status_code=422,
+            )
 
-        user_data = data.model_dump(exclude={"password"})
-        user_data["email"] = str(data.email)
-        user_data["hashed_password"] = await hash_password(data.password)
+    async def _check_email_available(
+        self,
+        email: str,
+        exclude_user_id: int | None = None,
+    ) -> None:
+        """Ensure an email is not already assigned to another user."""
 
-        try:
-            user = await self.repository.create(user_data)
-            await self.session.commit()
-            return user
-        except IntegrityError as exc:
-            await self.session.rollback()
-            raise ConflictError(messages.USER_EMAIL_ALREADY_REGISTERED) from exc
-        except Exception:
-            await self.session.rollback()
-            raise
+        existing_user = await self.repository.get_by_email(email)
 
-    async def get_user(self, user_id: int) -> User:
+        if existing_user is not None and existing_user.id != exclude_user_id:
+            raise EmailAlreadyRegistered()
+
+    @staticmethod
+    def _handle_email_integrity_error(exc: IntegrityError) -> NoReturn:
+        """Translate duplicate-email database errors into a domain error."""
+
+        if is_email_unique_violation(exc):
+            raise EmailAlreadyRegistered() from None
+
+        raise exc
+
+    async def get_users(
+        self,
+        page: int = 1,
+        limit: int = 10,
+    ) -> UserListResponse:
+        """Get a paginated list of users."""
+
+        users, total = await self.repository.get_paginated(
+            page=page,
+            limit=limit,
+        )
+
+        return UserListResponse(
+            items=[UserResponse.model_validate(user) for user in users],
+            total=total,
+            page=page,
+            limit=limit,
+        )
+
+    async def get_user(self, user_id: int) -> UserResponse:
         """Get a user by ID."""
 
         user = await self.repository.get_by_id(user_id)
@@ -52,79 +94,105 @@ class UserService:
         if user is None:
             raise NotFoundException(messages.USER_NOT_FOUND)
 
-        return user
+        return UserResponse.model_validate(user)
 
-    async def get_users(
-        self,
-        page: int = 1,
-        limit: int = 10,
-    ) -> tuple[list[User], int]:
-        """Get users with pagination."""
+    async def create_user(self, data: UserCreate) -> UserResponse:
+        """Create a user and hash the supplied password."""
 
-        return await self.repository.get_paginated(
-            page=page,
-            limit=limit,
-        )
+        email = str(data.email)
+        await self._check_email_available(email)
+
+        hashed_password = await hash_password(data.password)
+
+        user_data = data.model_dump(exclude={"password"})
+        user_data["email"] = email
+        user_data["hashed_password"] = hashed_password
+
+        try:
+            user = await self.repository.create_user(user_data)
+        except ConflictError as exc:
+            if exc.message == messages.EMAIL_ALREADY_REGISTERED:
+                raise EmailAlreadyRegistered() from None
+            raise
+        except IntegrityError as exc:
+            self._handle_email_integrity_error(exc)
+
+        return UserResponse.model_validate(user)
 
     async def update_user(
         self,
         user_id: int,
         data: UserUpdate,
-    ) -> User:
-        """Update a user and commit the transaction."""
+    ) -> UserResponse:
+        """Update an administrative user profile."""
 
         update_data = data.model_dump(exclude_unset=True)
-
-        if any(value is None for value in update_data.values()):
-            raise ValidationException(messages.USER_UPDATE_FIELDS_CANNOT_BE_NULL)
-
-        user = await self.repository.get_by_id(user_id)
-
-        if user is None:
-            raise NotFoundException(messages.USER_NOT_FOUND)
+        self._validate_update_data(update_data)
 
         if "email" in update_data:
             update_data["email"] = str(update_data["email"])
-
-            existing_user = await self.repository.get_by_email(update_data["email"])
-
-            if existing_user is not None and existing_user.id != user_id:
-                raise ConflictError(messages.USER_EMAIL_ALREADY_REGISTERED)
+            await self._check_email_available(
+                update_data["email"],
+                exclude_user_id=user_id,
+            )
 
         try:
-            updated_user = await self.repository.update(
+            user = await self.repository.update_user(
                 user_id,
                 update_data,
             )
-
-            if updated_user is None:
-                raise NotFoundException(messages.USER_NOT_FOUND)
-
-            await self.session.commit()
-            return updated_user
-
         except IntegrityError as exc:
-            await self.session.rollback()
-            raise ConflictError(messages.USER_EMAIL_ALREADY_REGISTERED) from exc
-        except Exception:
-            await self.session.rollback()
-            raise
-
-    async def delete_user(self, user_id: int) -> None:
-        """Delete a user while preserving referenced records."""
-
-        user = await self.repository.get_by_id(user_id)
+            self._handle_email_integrity_error(exc)
 
         if user is None:
             raise NotFoundException(messages.USER_NOT_FOUND)
 
-        try:
-            await self.repository.delete(user_id)
-            await self.session.commit()
+        return UserResponse.model_validate(user)
 
+    async def update_profile(
+        self,
+        user_id: int,
+        data: UserProfileUpdate,
+    ) -> UserResponse:
+        """Update the authenticated user's own profile."""
+
+        update_data = data.model_dump(exclude_unset=True)
+        self._validate_update_data(update_data)
+
+        if "email" in update_data:
+            update_data["email"] = str(update_data["email"])
+            await self._check_email_available(
+                update_data["email"],
+                exclude_user_id=user_id,
+            )
+
+        try:
+            user = await self.repository.update(
+                user_id,
+                update_data,
+            )
         except IntegrityError as exc:
-            await self.session.rollback()
-            raise ConflictError(messages.CANNOT_DELETE_REFERENCED_RESOURCE) from exc
-        except Exception:
-            await self.session.rollback()
-            raise
+            self._handle_email_integrity_error(exc)
+
+        if user is None:
+            raise NotFoundException(messages.USER_NOT_FOUND)
+
+        return UserResponse.model_validate(user)
+
+    async def delete_user(
+        self,
+        user_id: int,
+        requester_id: int,
+    ) -> None:
+        """Delete a user while enforcing account-management rules."""
+
+        if user_id == requester_id:
+            raise CannotDeleteOwnAccount()
+
+        try:
+            deleted = await self.repository.delete_user(user_id)
+        except IntegrityError as exc:
+            self._handle_email_integrity_error(exc)
+
+        if not deleted:
+            raise NotFoundException(messages.USER_NOT_FOUND)
