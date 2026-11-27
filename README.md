@@ -407,7 +407,7 @@ All endpoints use the `/api/v1` prefix.
 | Projects | Create, list, retrieve, update, delete |
 | Tasks | Task CRUD, assignment, filtering, pagination |
 | Labels | Create, list, retrieve, update, delete, assign, remove |
-| Comments | Create, list, delete |
+| Comments | Create, list, update, delete |
 
 See Swagger UI at `/docs` for request and response schemas.
 
@@ -497,6 +497,7 @@ clients cannot supply `author_id` or `created_at`.
 | DELETE | `/tasks/{task_id}/labels/{label_id}` | Remove a label from a task | Owner / Editor |
 | POST | `/tasks/{task_id}/comments` | Add a task comment | Owner / Editor |
 | GET | `/tasks/{task_id}/comments` | List task comments | Workspace access |
+| PATCH | `/comments/{comment_id}` | Update a task comment (author only) | Comment author |
 | DELETE | `/comments/{comment_id}` | Delete a task comment | Owner / Editor |
 
 System administrators receive owner-level access through the existing
@@ -513,18 +514,24 @@ assigned to a task; the API returns the same 404 response used for a missing or
 inaccessible label. Removing a label association that does not exist also
 returns 404. Deleting a label resource is a separate operation.
 
-Comments can be created, listed, and deleted; there is no comment-edit endpoint.
-The authenticated user supplies the author identity, and request validation
-rejects client-supplied `author_id` or `created_at`. Comment content is limited
-to 5000 characters. OWNER and EDITOR users can create and delete comments;
-VIEWER users can read comments but cannot create or delete them. Deletion is
-workspace-role-based, not author-based: an OWNER or EDITOR may delete another
-user's comment.
+Comments can be created, listed, updated, and deleted. The authenticated user
+supplies the author identity, and request validation rejects client-supplied
+`author_id` or `created_at`. Comment content is limited to 5000 characters.
+OWNER and EDITOR users can create comments. VIEWER users can read comments but
+cannot create them. Only the comment author can update their own comment,
+including when their workspace role is VIEWER. Other users, including
+workspace OWNERs and system ADMINs, cannot update a comment they did not
+author. Users without workspace access cannot update comments.
+Comment deletion follows a separate authorization policy: the comment author
+or a workspace OWNER can delete a comment. System ADMIN users receive
+effective OWNER-level access. EDITOR and VIEWER users cannot delete another
+user's comment. A comment author who is still a workspace member can delete
+their own comment even if their role is VIEWER.
 
 Label and comment writes are rejected for archived projects. This includes
 creating, updating, or deleting a label; assigning or removing a task-label
-association; and creating or deleting a comment. Reading and listing remain
-available subject to workspace access.
+association; and creating, updating, or deleting a comment. Reading and
+listing remain available subject to workspace access.
 
 The task, label, and comment services share workspace-access helpers. System
 ADMIN users receive effective OWNER-level access; workspace OWNERs have
@@ -673,7 +680,7 @@ The test suite includes:
 | `test_projects.py` | Project CRUD and workspace-level authorization |
 | `test_tasks.py` | Task CRUD, workspace roles, assignment, validation, filters, pagination, and archived-project rules |
 | `test_labels.py` | Label CRUD, task associations, project boundaries, and role permissions |
-| `test_comments.py` | Comment creation, listing, validation, server-assigned authorship, deletion, and workspace-role permissions |
+| `test_comments.py` | Comment creation, listing, updating, validation, server-assigned authorship, deletion, and workspace-role permissions |
 | `test_repositories.py` | Repository operations |
 | `test_redis_integration.py` | Redis integration, refresh-token rotation, reuse detection, and revocation |
 
@@ -735,7 +742,7 @@ Latest reported Day 6 checks:
 
 | Check | Result |
 |---|---|
-| Full Pytest suite (`uv run pytest -q`) | 157 passed |
+| Full Pytest suite (`uv run pytest -q`) | 164 passed |
 | Ruff (`uv run ruff check .`) | All checks passed |
 | MyPy (`uv run mypy app`) | Success, no issues found in 65 source files |
 | `git diff --check` | Passed |
