@@ -278,6 +278,8 @@ Copy-Item .env.example .env
 Update the environment variables in `.env` to match your local configuration.
 
 Make sure the PostgreSQL and Redis connection settings are correct.
+`REDIS_TASK_CACHE_TTL_SECONDS` controls the task-list cache TTL and defaults to
+60 seconds.
 
 **Do not commit `.env` or expose secret values in the repository.**
 
@@ -480,6 +482,50 @@ Base path:
 
 For request and response schemas, see the Swagger UI at `/docs`.
 
+### Tasks
+
+Task listing supports database-level keyword search, filtering, pagination,
+Redis caching, and eager-loaded label responses:
+
+```text
+GET /api/v1/projects/{project_id}/tasks
+```
+
+Supported query parameters:
+
+| Parameter | Values | Behavior |
+|---|---|---|
+| `search` | String, 1–255 characters | Case-insensitive title and description search |
+| `status` | Repeatable `TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE` | Match any supplied status |
+| `priority` | Repeatable `LOW`, `MEDIUM`, `HIGH`, `URGENT` | Match any supplied priority |
+| `assignee_id` | Positive integer | Match the assigned workspace member |
+| `page` | Integer, default `1` | Page number, minimum `1` |
+| `limit` | Integer, default `10`, maximum `100` | Items per page |
+
+Repeated `status` and `priority` values are supported. The parameters can be
+combined and apply to the returned `total` as well as the paginated `items`.
+Whitespace-only search is rejected; search is trimmed and SQL wildcard
+characters are treated literally.
+
+The task-list response remains:
+
+```json
+{
+  "items": [],
+  "total": 0,
+  "page": 1,
+  "limit": 10
+}
+```
+
+Task-list entries are cached in Redis using the project, authenticated user,
+query filters, search, page, limit, and a project cache-generation version.
+Authorization is checked before cache access. Redis failures fall back to
+PostgreSQL. Successful task and label mutations, project/workspace mutations,
+and workspace-member removal advance the affected project's cache-generation
+version after the database transaction commits; old entries expire according
+to `REDIS_TASK_CACHE_TTL_SECONDS`.
+
 ### Labels and Comments
 
 Labels belong to a project. Task-label assignment is limited to tasks in the
@@ -502,9 +548,7 @@ clients cannot supply `author_id` or `created_at`.
 
 System administrators receive owner-level access through the existing
 workspace authorization policy. Viewers can read accessible labels and
-comments but cannot create, update, assign, remove, or delete them. Comment
-deletion follows the existing role-based Task deletion policy; authorship does
-not grant a separate deletion permission.
+comments but cannot create, update, assign, or remove them.
 
 Labels are project-scoped. Names must be unique within a project; creating or
 renaming a label to a name already used in that project returns HTTP 409
@@ -734,6 +778,7 @@ The project is developed incrementally according to the FastAPI module curriculu
 | Day 4 | Authorization & RBAC | Completed |
 | Day 5 | Task Management | Completed |
 | Day 6 | Label & Comment Management | Completed |
+| Day 7 | Search, Filtering, Pagination & Cache | Completed |
 
 
 ### Day 6 Verification
@@ -747,8 +792,29 @@ Latest reported Day 6 checks:
 | MyPy (`uv run mypy app`) | Success, no issues found in 65 source files |
 | `git diff --check` | Passed |
 
-Day 6 implementation and testing are complete. PR #7 is awaiting final review
-and merge; it has not been merged. Day 7 and Day 8 have not started.
+Day 6 implementation and testing are complete. PR #7 has been merged into
+the `followup/logging` branch, which has subsequently been merged into `main`.
+
+### Day 7 Implementation
+
+Day 7 introduces keyword search, filtering, pagination, and Redis caching for task lists:
+- Keyword search: database-level search across task title and description with literal handling of SQL wildcard characters and case-insensitivity.
+- Filtering: combined filtering by task status, priority, and assignee.
+- Pagination: paginated task responses with total count, page, and limit parameters.
+- Redis task-list caching: cached task list queries using project, user, query parameters hash, and cache version.
+- Cache invalidation: version-based invalidation advancing on task, label, project, and workspace member mutations after database transaction commit.
+
+### Day 7 Verification
+
+| Check | Result |
+|---|---|
+| Full Pytest suite (`uv run pytest -v`) | 180 passed |
+| Ruff (`uv run ruff check .`) | All checks passed |
+| MyPy (`uv run mypy app`) | Success, no issues found in 65 source files |
+| `git diff --check` | Passed |
+
+Day 7 implementation and testing are locally verified. A Day 7 PR has not yet
+been created or merged. Day 8 has not started.
 
 ---
 

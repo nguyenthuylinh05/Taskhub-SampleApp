@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Response, status
 
 from app.api.dependencies import CurrentUserDep
+from app.core.constants import TASK_SEARCH_MAX_LENGTH
 from app.core.dependencies import PaginationDep, TaskServiceDep
 from app.models.enums import TaskPriority, TaskStatus
 from app.schemas.task import (
@@ -63,6 +64,14 @@ async def get_tasks(
         Query(),
     ] = None,
     assignee_id: Annotated[int | None, Query(ge=1)] = None,
+    search: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            max_length=TASK_SEARCH_MAX_LENGTH,
+            pattern=r".*\S.*",
+        ),
+    ] = None,
 ) -> TaskListResponse:
     return await service.get_tasks(
         project_id=project_id,
@@ -71,6 +80,7 @@ async def get_tasks(
         priority=priority,
         assignee_id=assignee_id,
         pagination=pagination,
+        search=search,
     )
 
 

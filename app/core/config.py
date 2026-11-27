@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = Field(default=6379, gt=0, le=65535)
     REDIS_DB: int = Field(default=0, ge=0)
+    REDIS_TASK_CACHE_TTL_SECONDS: int = Field(default=60, gt=0)
 
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":
@@ -128,3 +129,4 @@ REDIS_HOST = settings.REDIS_HOST
 REDIS_PORT = settings.REDIS_PORT
 REDIS_DB = settings.REDIS_DB
 REDIS_URL = settings.REDIS_URL
+REDIS_TASK_CACHE_TTL_SECONDS = settings.REDIS_TASK_CACHE_TTL_SECONDS

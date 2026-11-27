@@ -1,3 +1,4 @@
+from app.core.database import register_project_cache_invalidation
 from app.core.exceptions import (
     ConflictError,
     InvalidOperation,
@@ -104,7 +105,15 @@ class WorkspaceService:
         return WorkspaceResponse.model_validate(updated_workspace)
 
     async def delete_workspace(self, workspace: Workspace) -> None:
+        project_ids = await self.task_repository.get_project_ids_for_workspace(
+            workspace.id
+        )
         await self.workspace_repository.delete_entity(workspace)
+        for project_id in project_ids:
+            register_project_cache_invalidation(
+                self.workspace_repository.session,
+                project_id,
+            )
 
     async def add_member(
         self,
@@ -160,6 +169,9 @@ class WorkspaceService:
             user_id,
         )
 
+        project_ids = await self.task_repository.get_project_ids_for_workspace(
+            workspace.id
+        )
         removed = await self.workspace_repository.remove_member(
             workspace.id,
             user_id,
@@ -167,3 +179,9 @@ class WorkspaceService:
 
         if not removed:
             raise NotFoundException(WORKSPACE_MEMBER_NOT_FOUND)
+
+        for project_id in project_ids:
+            register_project_cache_invalidation(
+                self.workspace_repository.session,
+                project_id,
+            )

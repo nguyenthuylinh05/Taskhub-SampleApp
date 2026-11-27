@@ -1,3 +1,7 @@
+import hashlib
+import json
+import logging
+from collections.abc import Iterable
 from typing import cast
 
 import redis.asyncio as redis
@@ -12,10 +16,120 @@ redis_client = redis.from_url(
     socket_timeout=5.0,
     socket_connect_timeout=5.0,
 )
+logger = logging.getLogger("taskhub.cache")
+
+
+def normalize_task_list_search(search: str | None) -> str | None:
+    """Normalize search text for equivalent cache-key generation."""
+
+    if search is None:
+        return None
+    normalized = search.strip().casefold()
+    return normalized or None
+
+
+def task_list_query_hash(
+    status: Iterable[object] | None,
+    priority: Iterable[object] | None,
+    assignee_id: int | None,
+    page: int,
+    limit: int,
+    search: str | None,
+) -> str:
+    """Build a canonical hash for task-list query parameters."""
+
+    def normalized_values(values: Iterable[object] | None) -> list[str]:
+        if values is None:
+            return []
+        return sorted({str(getattr(value, "value", value)) for value in values})
+
+    canonical_query = {
+        "status": normalized_values(status),
+        "priority": normalized_values(priority),
+        "assignee_id": assignee_id,
+        "search": normalize_task_list_search(search),
+        "page": page,
+        "limit": limit,
+    }
+    return hashlib.sha256(
+        json.dumps(
+            canonical_query,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 async def close_redis_connection() -> None:
     await redis_client.aclose()
+
+
+def task_list_cache_key(
+    project_id: int,
+    user_id: int,
+    version: str,
+    query_hash: str,
+) -> str:
+    """Build a versioned project/user task-list cache key."""
+
+    return f"task-list:v1:{project_id}:{user_id}:{version}:{query_hash}"
+
+
+async def get_task_list_cache_version(project_id: int) -> str | None:
+    """Get or initialize a project task-list cache generation."""
+
+    version_key = f"task-list:project:{project_id}:version"
+    try:
+        version = await redis_client.get(version_key)
+        if version is None:
+            created = await redis_client.set(version_key, "1", nx=True)
+            if created:
+                return "1"
+            version = await redis_client.get(version_key)
+        return str(version) if version is not None else "1"
+    except Exception:
+        logger.exception(
+            "Redis task-list cache version read failed for project_id=%s",
+            project_id,
+        )
+        return None
+
+
+async def increment_task_list_cache_version(project_id: int) -> None:
+    """Advance a project cache generation after a successful database commit."""
+
+    version_key = f"task-list:project:{project_id}:version"
+    try:
+        await redis_client.incr(version_key)
+    except Exception:
+        logger.exception(
+            "Redis task-list cache invalidation failed for project_id=%s",
+            project_id,
+        )
+
+
+async def get_task_list_cached_response(cache_key: str) -> str | None:
+    """Read a task-list JSON payload, returning None on Redis failure."""
+
+    try:
+        value = await redis_client.get(cache_key)
+        return str(value) if value is not None else None
+    except Exception:
+        logger.exception("Redis task-list cache read failed for key=%s", cache_key)
+        return None
+
+
+async def set_task_list_cached_response(
+    cache_key: str,
+    payload: str,
+    ttl_seconds: int,
+) -> None:
+    """Write a task-list JSON payload with TTL; Redis failures are non-fatal."""
+
+    try:
+        await redis_client.set(cache_key, payload, ex=ttl_seconds)
+    except Exception:
+        logger.exception("Redis task-list cache write failed for key=%s", cache_key)
 
 
 async def store_refresh_token(

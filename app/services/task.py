@@ -1,5 +1,11 @@
 """Business logic for task operations."""
 
+import json
+
+from pydantic import ValidationError
+
+from app.core.config import REDIS_TASK_CACHE_TTL_SECONDS
+from app.core.database import register_project_cache_invalidation
 from app.core.exceptions import (
     InvalidOperation,
     NotFoundException,
@@ -10,6 +16,13 @@ from app.core.messages import (
     TASK_ASSIGNEE_NOT_IN_WORKSPACE,
     TASK_NOT_FOUND,
     USER_NOT_FOUND,
+)
+from app.core.redis import (
+    get_task_list_cache_version,
+    get_task_list_cached_response,
+    set_task_list_cached_response,
+    task_list_cache_key,
+    task_list_query_hash,
 )
 from app.models.enums import (
     TaskPriority,
@@ -139,6 +152,10 @@ class TaskService:
             }
         )
 
+        register_project_cache_invalidation(
+            self.task_repository.session,
+            project_id,
+        )
         return await self._get_task_response(task.id)
 
     async def get_tasks(
@@ -149,10 +166,39 @@ class TaskService:
         status: list[TaskStatus] | None = None,
         priority: list[TaskPriority] | None = None,
         assignee_id: int | None = None,
+        search: str | None = None,
     ) -> TaskListResponse:
         """Get filtered and paginated tasks in a project."""
 
         await self._get_project_and_workspace(project_id, current_user)
+
+        normalized_search = search.strip() if search is not None else None
+        if normalized_search == "":
+            raise InvalidOperation("Search term must not be empty")
+
+        query_hash = task_list_query_hash(
+            status=status,
+            priority=priority,
+            assignee_id=assignee_id,
+            page=pagination.page,
+            limit=pagination.limit,
+            search=normalized_search,
+        )
+
+        cache_version = await get_task_list_cache_version(project_id)
+        if cache_version is not None:
+            cache_key = task_list_cache_key(
+                project_id,
+                current_user.id,
+                cache_version,
+                query_hash,
+            )
+            cached_payload = await get_task_list_cached_response(cache_key)
+            if cached_payload is not None:
+                try:
+                    return TaskListResponse.model_validate_json(cached_payload)
+                except (ValidationError, json.JSONDecodeError):
+                    pass
 
         tasks, total = await self.task_repository.get_filtered_by_project(
             project_id=project_id,
@@ -160,14 +206,22 @@ class TaskService:
             status=status,
             priority=priority,
             assignee_id=assignee_id,
+            search=normalized_search,
         )
 
-        return TaskListResponse(
+        response = TaskListResponse(
             items=[TaskResponse.model_validate(task) for task in tasks],
             total=total,
             page=pagination.page,
             limit=pagination.limit,
         )
+        if cache_version is not None:
+            await set_task_list_cached_response(
+                cache_key,
+                response.model_dump_json(),
+                REDIS_TASK_CACHE_TTL_SECONDS,
+            )
+        return response
 
     async def update_task(
         self,
@@ -201,6 +255,10 @@ class TaskService:
             update_data,
         )
 
+        register_project_cache_invalidation(
+            self.task_repository.session,
+            task.project_id,
+        )
         return await self._get_task_response(updated_task.id)
 
     async def delete_task(
@@ -222,3 +280,7 @@ class TaskService:
         ensure_project_active(project)
 
         await self.task_repository.delete_entity(task)
+        register_project_cache_invalidation(
+            self.task_repository.session,
+            task.project_id,
+        )

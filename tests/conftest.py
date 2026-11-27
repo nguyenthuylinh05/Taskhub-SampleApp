@@ -8,11 +8,15 @@ from uuid import uuid4
 import anyio
 import pytest
 import pytest_asyncio
+import redis as redis_sync
 import redis.asyncio as redis
 from alembic import command
 from alembic.config import Config
 from app.core.config import settings
-from app.core.database import get_db_session
+from app.core.database import (
+    get_db_session,
+    invalidate_registered_project_cache_versions,
+)
 from app.main import app
 from app.models import User, UserRole, Workspace, WorkspaceRole, workspace_members
 from fastapi.testclient import TestClient
@@ -340,9 +344,49 @@ async def real_redis(
 
 
 @pytest.fixture
+def task_cache_redis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[redis_sync.Redis, None, None]:
+    """Provide isolated task-cache Redis storage without touching refresh keys."""
+
+    import app.core.redis as redis_module
+
+    async_client = redis.from_url(
+        "redis://localhost:6379/14",
+        encoding="utf-8",
+        decode_responses=True,
+        socket_timeout=5.0,
+        socket_connect_timeout=5.0,
+    )
+    sync_client = redis_sync.Redis(
+        host="localhost",
+        port=6379,
+        db=14,
+        decode_responses=True,
+        socket_timeout=5.0,
+    )
+
+    def clean_task_cache() -> None:
+        keys = list(sync_client.scan_iter(match="task-list:*"))
+        if keys:
+            sync_client.delete(*keys)
+
+    sync_client.ping()
+    clean_task_cache()
+    monkeypatch.setattr(redis_module, "redis_client", async_client)
+
+    try:
+        yield sync_client
+    finally:
+        clean_task_cache()
+        sync_client.close()
+
+
+@pytest.fixture
 def client(
     migrated_test_database: None,
     mock_redis: dict[str, AsyncMock],
+    task_cache_redis: redis_sync.Redis,
 ) -> Generator[TestClient, None, None]:
     """Create an API test client connected to the test database."""
 
@@ -363,6 +407,7 @@ def client(
             try:
                 yield session
                 await session.commit()
+                await invalidate_registered_project_cache_versions(session)
             except Exception:
                 await session.rollback()
                 raise

@@ -3,8 +3,11 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import anyio
+import app.main as main_module
 import pytest
 from app.core.exception_handlers import unhandled_exception_handler
 from app.core.logging import configure_logging
@@ -602,3 +605,32 @@ def test_service_unavailable_is_logged_as_error(
         for record in caplog.records
         if record.name == "taskhub.request"
     )
+
+
+@pytest.mark.asyncio
+async def test_application_lifespan_disposes_database_when_redis_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Database engine cleanup must run even when Redis shutdown fails."""
+
+    redis_close = AsyncMock(side_effect=RuntimeError("Redis shutdown failure"))
+    engine_dispose = AsyncMock()
+
+    monkeypatch.setattr(
+        main_module,
+        "close_redis_connection",
+        redis_close,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "engine",
+        SimpleNamespace(dispose=engine_dispose),
+    )
+    monkeypatch.setattr(main_module, "configure_logging", lambda _level: None)
+
+    with pytest.raises(RuntimeError, match="Redis shutdown failure"):
+        async with main_module.lifespan(main_module.app):
+            pass
+
+    redis_close.assert_awaited_once()
+    engine_dispose.assert_awaited_once()

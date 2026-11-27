@@ -20,9 +20,7 @@ class TaskRepository(BaseRepository[Task]):
         """Get a task and eagerly load its assigned labels."""
 
         statement = (
-            select(Task)
-            .options(selectinload(Task.labels))
-            .where(Task.id == task_id)
+            select(Task).options(selectinload(Task.labels)).where(Task.id == task_id)
         )
         result = await self.session.scalars(statement)
         return result.one_or_none()
@@ -34,6 +32,7 @@ class TaskRepository(BaseRepository[Task]):
         status: list[TaskStatus] | None = None,
         priority: list[TaskPriority] | None = None,
         assignee_id: int | None = None,
+        search: str | None = None,
     ) -> tuple[list[Task], int]:
         """Get filtered and paginated tasks belonging to a project."""
 
@@ -47,6 +46,19 @@ class TaskRepository(BaseRepository[Task]):
 
         if assignee_id is not None:
             conditions.append(Task.assignee_id == assignee_id)
+
+        if search:
+            escaped = (
+                search.strip()
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            pattern = f"%{escaped}%"
+            conditions.append(
+                Task.title.ilike(pattern, escape="\\")
+                | Task.description.ilike(pattern, escape="\\")
+            )
 
         total_statement = select(func.count()).select_from(Task).where(*conditions)
         total = await self.session.scalar(total_statement) or 0
@@ -85,3 +97,14 @@ class TaskRepository(BaseRepository[Task]):
         )
 
         await self.session.execute(statement)
+
+    async def get_project_ids_for_workspace(
+        self,
+        workspace_id: int,
+    ) -> list[int]:
+        """Get project IDs affected by workspace-level mutations."""
+
+        result = await self.session.scalars(
+            select(Project.id).where(Project.workspace_id == workspace_id)
+        )
+        return list(result.all())
